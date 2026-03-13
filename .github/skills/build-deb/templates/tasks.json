@@ -1,0 +1,17 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Build Debian Package",
+      "type": "shell",
+      "command": "${INSTALLER_DIR:-linux/installer}/build_deb.sh",
+      "args": [],
+      "isBackground": false,
+      "problemMatcher": [],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      }
+    }
+  ]
+}
