@@ -137,6 +137,7 @@ The `templates/` directory contains exhaustive, version-by-version documentation
 
 *   **[mobile_widgets.md](templates/mobile_widgets.md)** — iOS (Cupertino) and Android (Material) widgets: `CupertinoSheet`, `CupertinoButton.tinted`, `CupertinoSlidingSegmentedControl` momentary mode, `CupertinoExpansionTile`, `CarouselView.builder`, `RepeatingAnimationBuilder`, `SensitiveContent`, Impeller changes, SPM migration, UIScene lifecycle, wide-gamut P3 colors, and all breaking changes.
 *   **[desktop_widgets.md](templates/desktop_widgets.md)** — Windows, macOS, and Linux widgets: Multi-window support (regular, dialog, popup, tooltip windows), UI/platform thread merge for smooth resizing, `RawMenuAnchor`, `NavigationRail` scrollable, `NavigationDrawer` headers/footers, `Expansible`/`ExpansibleController`, and SPM on macOS.
+*   **[desktop_project_patterns.md](templates/desktop_project_patterns.md)** — Patrones de boilerplate extraídos de un proyecto real de escritorio Flutter: gestión de temas con `flutter_riverpod` + `shared_preferences`, `window_manager` + `tray_manager` (resolución de ícono Windows, workaround Wayland, eventos de clic por plataforma), `local_notifier`, `sqflite_common_ffi` + `path_provider`, generación de PDF con `pdf` + `printing`, cliente IMAP con `enough_mail`, y `MenuBar` nativo con `CallbackShortcuts`.
 *   **[web_widgets.md](templates/web_widgets.md)** — Web (CanvasKit/WASM) rendering and widgets: HTML renderer removal, WASM dry-run validation, `WebParagraph` enhancements, native `<img>` offloading, stateful web hot reload, `dart:js_interop` migration, `OverlayPortal` improvements, and platform-specific asset bundling.
 
 **You MUST consult these catalogs** when building for a specific platform to ensure you are using the exact latest API and not legacy patterns.
@@ -902,6 +903,475 @@ class _AppState extends State<MyApp> with TrayListener, WindowListener {
 - **`app_links` conflict:** Si usas `app_links`, debe ser `>= 6.3.3`. Versiones anteriores bloquean la propagación de eventos e impiden que se disparen los clicks del menú de bandeja.
 - **GNOME (Linux):** El ícono puede no mostrarse sin la extensión [AppIndicator](https://extensions.gnome.org/extension/615/appindicator-support/).
 
+### Patrón Real: Resolución de Ícono en Windows (Ruta Absoluta en Disco)
+
+En Windows, `tray_manager` **no acepta rutas de assets de Flutter** (`'assets/icon.png'`). Requiere una **ruta absoluta del disco** apuntando al `.ico`. La ruta varía entre modo debug (`flutter run`) y release compilado. Este helper resuelve ambos casos:
+
+```dart
+import 'dart:io';
+import 'package:path/path.dart' as p;
+
+String resolveTrayIconPath() {
+  if (Platform.isWindows) {
+    final exeDir = p.dirname(Platform.resolvedExecutable);
+    final candidates = [
+      p.join(exeDir, 'resources', 'app_icon.ico'),                                    // Release
+      p.join(Directory.current.path, 'windows', 'runner', 'resources', 'app_icon.ico'), // Debug
+      p.normalize(p.join(exeDir, '..', 'resources', 'app_icon.ico')),                 // Alternativo
+    ];
+    for (final path in candidates) {
+      if (File(path).existsSync()) return path;
+    }
+  }
+  return 'assets/tray_icon.png'; // macOS y Linux usan rutas de asset normal
+}
+
+// Uso en main():
+await trayManager.setIcon(resolveTrayIconPath());
+```
+
+### Patrón Real: Diferencias de Eventos de Clic Derecho por Plataforma
+
+Cada SO dispara el menú contextual en un evento diferente. Ignorar esto provoca que el menú no aparezca en alguna plataforma:
+
+```dart
+/// WINDOWS: menú en onTrayIconRightMouseDown (al presionar)
+@override
+void onTrayIconRightMouseDown() {
+  if (Platform.isWindows) trayManager.popUpContextMenu();
+}
+
+/// LINUX: menú en onTrayIconRightMouseUp (al soltar)
+@override
+void onTrayIconRightMouseUp() {
+  if (Platform.isLinux) trayManager.popUpContextMenu();
+}
+
+/// macOS: el SO muestra el menú automáticamente — NO invocar popUpContextMenu()
+```
+
+### Patrón Real: Restaurar Ventana desde Bandeja (Workaround Wayland)
+
+En Linux con Wayland, `windowManager.show()` por sí solo puede fallar al traer la ventana al frente. Solución probada en producción:
+
+```dart
+@override
+void onTrayIconMouseDown() async {
+  if (!await windowManager.isFocused()) {
+    if (await windowManager.isMinimized()) await windowManager.restore();
+    if (Platform.isLinux) await windowManager.hide(); // Workaround Wayland: hide primero
+    await windowManager.show();
+    await windowManager.setAlwaysOnTop(true);
+    await windowManager.focus();
+    await Future.delayed(const Duration(milliseconds: 300));
+    await windowManager.setAlwaysOnTop(false); // Quitar always-on-top tras el foco
+  }
+}
+```
+
 ---
 
-**Final Directive:** If the code you generate misses opportunities to use `CarouselView.builder`, `popUntilWithResult`, `CupertinoSheet` drag handles, `RepeatingAnimationBuilder`, uses `SizedBox` for spacing, or prefixes an Enum unnecessarily, you have failed the 3.41 standard. For desktop apps, failing to use `PlatformDispatcher` for multi-window, using old community window plugins, or assuming a single `devicePixelRatio` for multi-monitor setups also constitutes a failure of the 3.41 standard. Write perfect modern Dart natively tailored to the platform.
+## 7.16 Plugin `desktop_multi_window` — ⛔ OBSOLETO en SDK 3.4x
+
+> **No usar en proyectos nuevos.** `desktop_multi_window` crea motores Flutter **separados** por ventana, lo que implica estado no compartido, comunicación por IPC serializado y mayor consumo de recursos.
+>
+> **Reemplazado por:** `PlatformDispatcher.instance.requestView()` del SDK 3.4x nativo, que usa un único Isolate compartido para todas las ventanas (ver Sección 7.1–7.3).
+
+Guía de migración para código legado:
+
+| `desktop_multi_window` (obsoleto) | SDK 3.4x Nativo |
+|---|---|
+| `DesktopMultiWindow.createWindow(args)` | `PlatformDispatcher.instance.requestView()` |
+| `WindowController.fromWindowId(id)` | `View.of(context)` en la vista destino |
+| IPC JSON entre ventanas | Paso de memoria directa (mismo Isolate) |
+| `controller.invokeMethod('refresh')` | `ref.invalidate(provider)` / `stream.add(event)` |
+| `WindowController.fromCurrentEngine().hide()` | `PlatformDispatcher.instance.closeView(viewId)` |
+
+---
+
+## 7.17 `MenuBar` Nativo + Atajos de Teclado (SDK — Sin Plugin)
+
+Flutter Desktop incluye nativamente `MenuBar`, `MenuItemButton`, `SubmenuButton` y `MenuAcceleratorLabel`. **No se requiere ningún plugin.** El patrón correcto combina `CallbackShortcuts` + `Focus` envolviendo todo el `Scaffold.body`.
+
+**Regla crítica:** El `shortcut` en la propiedad de `MenuItemButton` solo activa el atajo si el usuario **tiene el menú abierto**. `CallbackShortcuts` + `Focus(autofocus: true)` son **obligatorios** para que los atajos funcionen desde cualquier parte de la app.
+
+```dart
+@override
+Widget build(BuildContext context) {
+  return Scaffold(
+    body: CallbackShortcuts(
+      bindings: <ShortcutActivator, VoidCallback>{
+        const SingleActivator(LogicalKeyboardKey.keyN, control: true): _openNewDialog,
+        const SingleActivator(LogicalKeyboardKey.keyP, control: true): _showPrintDialog,
+        const SingleActivator(LogicalKeyboardKey.keyR, control: true): _refresh,
+      },
+      child: Focus(
+        autofocus: true, // Sin esto, los shortcuts no se capturan al inicio
+        child: Column(
+          children: [
+            MenuBar(
+              children: [
+                SubmenuButton(
+                  // '&' antes de la letra define el acelerador (Alt+F abre este menú)
+                  child: const MenuAcceleratorLabel('&File'),
+                  menuChildren: [
+                    MenuItemButton(
+                      leadingIcon: const Icon(Icons.add, size: 16),
+                      onPressed: _openNewDialog,
+                      shortcut: const SingleActivator(LogicalKeyboardKey.keyN, control: true),
+                      // '\t' genera el espaciado visual nativo del atajo a la derecha
+                      child: const MenuAcceleratorLabel('&New\tCtrl+N'),
+                    ),
+                    const Divider(),
+                    MenuItemButton(
+                      leadingIcon: const Icon(Icons.print, size: 16),
+                      onPressed: _showPrintDialog,
+                      shortcut: const SingleActivator(LogicalKeyboardKey.keyP, control: true),
+                      child: const MenuAcceleratorLabel('&Print\tCtrl+P'),
+                    ),
+                    const Divider(),
+                    MenuItemButton(
+                      leadingIcon: const Icon(Icons.exit_to_app, size: 16),
+                      onPressed: _exitApp,
+                      child: const MenuAcceleratorLabel('E&xit'),
+                    ),
+                  ],
+                ),
+                SubmenuButton(
+                  child: const MenuAcceleratorLabel('&View'),
+                  menuChildren: [
+                    MenuItemButton(
+                      onPressed: () => setState(() => _view = ViewState.users),
+                      shortcut: const SingleActivator(LogicalKeyboardKey.digit1, control: true),
+                      child: const MenuAcceleratorLabel('&Users\tCtrl+1'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+            Expanded(child: _currentView),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+```
+
+**Conceptos clave:**
+- **`MenuAcceleratorLabel('&File')`:** El `&` convierte la letra siguiente en acelerador `Alt+F`. Funciona dentro del menú abierto con Alt.
+- **`'\tCtrl+N'`:** El `\t` produce el espaciado visual nativo entre el label y el atajo a la derecha.
+- **`CallbackShortcuts` + `Focus(autofocus: true)`:** Obligatorio para atajos globales sin que el usuario abra el menú.
+- **`RawMenuAnchor`:** Para menús completamente personalizados sin estilo por defecto (Flutter 3.32+).
+
+---
+
+## 7.18 Plugin `local_notifier` — Notificaciones del Sistema Desktop
+
+Para despachar notificaciones de escritorio nativas (Centro de Notificaciones de Windows, macOS y libnotify en Linux).
+
+```yaml
+dependencies:
+  local_notifier: ^0.1.5
+```
+
+```dart
+import 'package:local_notifier/local_notifier.dart';
+
+// En main() — obligatorio antes de mostrar notificaciones
+await localNotifier.setup(appName: 'My App');
+
+// Notificación simple
+final notification = LocalNotification(
+  title: 'My App',
+  body: 'Operación completada.',
+);
+await notification.show();
+
+// Con botones de acción
+final actionNotif = LocalNotification(
+  title: 'New Message',
+  body: 'Tienes un nuevo mensaje.',
+  actions: [
+    LocalNotificationAction(type: 'button', text: 'Open'),
+    LocalNotificationAction(type: 'button', text: 'Dismiss'),
+  ],
+);
+actionNotif.onClickAction = (actionIndex) {
+  if (actionIndex == 0) windowManager.show();
+};
+await actionNotif.show();
+```
+
+---
+
+## 7.19 Base de Datos Desktop: `sqflite_common_ffi` + `path_provider`
+
+En Flutter Desktop **no se puede usar `sqflite` directamente** (está enlazado a wrappers Java/ObjC de mobile). Se usa `sqflite_common_ffi` que enlaza SQLite mediante FFI a bibliotecas C nativas del sistema.
+
+```yaml
+dependencies:
+  sqflite_common_ffi: ^2.3.3
+  path_provider: ^2.1.4
+  path: ^1.9.0
+```
+
+```dart
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:path/path.dart';
+
+class DatabaseHelper {
+  static final DatabaseHelper instance = DatabaseHelper._();
+  static Database? _db;
+  DatabaseHelper._();
+
+  Future<Database> get database async => _db ??= await _initDB('app.db');
+
+  Future<Database> _initDB(String fileName) async {
+    // Paso CRÍTICO: inicializar FFI antes de cualquier operación de base de datos
+    if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+      sqfliteFfiInit();
+      databaseFactory = databaseFactoryFfi;
+    }
+    final dir = await getApplicationDocumentsDirectory();
+    final path = join(dir.path, fileName);
+    return databaseFactory.openDatabase(
+      path,
+      options: OpenDatabaseOptions(
+        version: 1,
+        onCreate: (db, version) async {
+          await db.execute('''
+            CREATE TABLE items (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              name TEXT NOT NULL,
+              created_at TEXT NOT NULL
+            )
+          ''');
+        },
+      ),
+    );
+  }
+}
+```
+
+**Directorios disponibles con `path_provider` en Desktop:**
+
+| Método | Windows | macOS | Linux |
+|---|---|---|---|
+| `getApplicationDocumentsDirectory()` | `Documents\AppName` | `~/Documents` | `~/Documents` |
+| `getApplicationSupportDirectory()` | `AppData\Roaming\AppName` | `~/Library/Application Support/AppName` | `~/.local/share/AppName` |
+| `getTemporaryDirectory()` | `%TEMP%` | `/tmp` | `/tmp` |
+| `getDownloadsDirectory()` | `Downloads` | `~/Downloads` | `~/Downloads` |
+
+---
+
+## 7.20 Estado Global y Temas Dinámicos: `flutter_riverpod` + `shared_preferences`
+
+Patrón para gestionar tema (Claro/Oscuro/Sistema) y color de acento con persistencia entre sesiones:
+
+```yaml
+dependencies:
+  flutter_riverpod: ^2.6.1
+  shared_preferences: ^2.3.3
+```
+
+```dart
+class ThemeSettings {
+  final ThemeMode mode;
+  final Color accentColor;
+  const ThemeSettings({
+    this.mode = ThemeMode.system,
+    this.accentColor = const Color(0xFF1565C0),
+  });
+  ThemeSettings copyWith({ThemeMode? mode, Color? accentColor}) => ThemeSettings(
+    mode: mode ?? this.mode,
+    accentColor: accentColor ?? this.accentColor,
+  );
+}
+
+class ThemeNotifier extends Notifier<ThemeSettings> {
+  @override
+  ThemeSettings build() {
+    _load();
+    return const ThemeSettings();
+  }
+
+  Future<void> _load() async {
+    final prefs = await SharedPreferences.getInstance();
+    final modeStr = prefs.getString('theme_mode');
+    final colorInt = prefs.getInt('accent_color');
+    state = ThemeSettings(
+      mode: modeStr != null
+          ? ThemeMode.values.firstWhere((e) => e.name == modeStr, orElse: () => ThemeMode.system)
+          : ThemeMode.system,
+      accentColor: colorInt != null ? Color(colorInt) : const Color(0xFF1565C0),
+    );
+  }
+
+  Future<void> setMode(ThemeMode mode) async {
+    state = state.copyWith(mode: mode);
+    (await SharedPreferences.getInstance()).setString('theme_mode', mode.name);
+  }
+
+  Future<void> setAccentColor(Color color) async {
+    state = state.copyWith(accentColor: color);
+    (await SharedPreferences.getInstance()).setInt('accent_color', color.toARGB32());
+  }
+}
+
+final themeProvider = NotifierProvider<ThemeNotifier, ThemeSettings>(ThemeNotifier.new);
+
+// Consumo en MaterialApp:
+class MyApp extends ConsumerWidget {
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = ref.watch(themeProvider);
+    return MaterialApp(
+      themeMode: theme.mode,
+      theme: ThemeData(colorSchemeSeed: theme.accentColor, brightness: Brightness.light),
+      darkTheme: ThemeData(colorSchemeSeed: theme.accentColor, brightness: Brightness.dark),
+      home: const MainWindow(),
+    );
+  }
+}
+```
+
+---
+
+## 7.21 Generación de PDF e Impresión Nativa: `pdf` + `printing`
+
+Dos plugins complementarios del mismo autor (DavBfr):
+- **`pdf`** — Construye documentos PDF usando una API de widgets *idéntica* a Flutter (`pw.Column`, `pw.Text`, `pw.Table`, etc.) pero que renderiza en vectores PDF, no en pantalla.
+- **`printing`** — Puente hacia los spoolers de impresoras nativos de Windows, macOS y Linux. También permite guardar el PDF como archivo, previsualizar antes de imprimir, y compartir.
+
+```yaml
+dependencies:
+  pdf: ^3.11.1
+  printing: ^5.13.2
+```
+
+### Generar un documento PDF
+
+Todos los widgets de `pdf` usan el prefijo `pw` para distinguirlos de los widgets de Flutter:
+
+```dart
+import 'dart:typed_data';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+
+class PrintService {
+  /// Genera los bytes del PDF. Se puede pasar a `Printing.layoutPdf` o guardar
+  /// en disco con `File.writeAsBytes()`.
+  static Future<Uint8List> generatePdf(List<Map<String, dynamic>> rows) async {
+    final pdf = pw.Document(
+      title: 'Reporte',
+      creator: 'My App',
+    );
+
+    // pw.MultiPage maneja la paginación automáticamente
+    pdf.addPage(
+      pw.MultiPage(
+        pageFormat: PdfPageFormat.a4,
+        margin: const pw.EdgeInsets.all(32),
+        build: (context) => [
+          pw.Header(
+            level: 0,
+            child: pw.Text(
+              'Reporte de Usuarios',
+              style: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold),
+            ),
+          ),
+          pw.SizedBox(height: 20),
+          pw.Table.fromTextArray(
+            context: context,
+            headers: ['ID', 'Nombre', 'F. Nacimiento', 'Teléfono'],
+            data: rows.map((r) => [
+              r['id'].toString(),
+              r['name'],
+              r['dob'],
+              r['phone'],
+            ]).toList(),
+            border: pw.TableBorder.all(color: PdfColors.grey400),
+            headerStyle: pw.TextStyle(
+              fontWeight: pw.FontWeight.bold,
+              color: PdfColors.white,
+            ),
+            headerDecoration: const pw.BoxDecoration(color: PdfColors.blue800),
+            cellAlignment: pw.Alignment.centerLeft,
+            cellPadding: const pw.EdgeInsets.all(8),
+          ),
+        ],
+        footer: (context) => pw.Container(
+          alignment: pw.Alignment.centerRight,
+          child: pw.Text(
+            'Página ${context.pageNumber} de ${context.pagesCount}',
+            style: const pw.TextStyle(fontSize: 10),
+          ),
+        ),
+      ),
+    );
+
+    return pdf.save(); // Devuelve Uint8List con los bytes del PDF
+  }
+}
+```
+
+### Imprimir / Previsualizar / Guardar en disco
+
+```dart
+import 'package:printing/printing.dart';
+
+// Abrir diálogo nativo de impresora del SO
+await Printing.layoutPdf(
+  onLayout: (format) => PrintService.generatePdf(rows),
+);
+
+// Previsualizar antes de imprimir (abre una ventana de previsualización)
+await Printing.layoutPdf(
+  onLayout: (format) => PrintService.generatePdf(rows),
+  name: 'Reporte de Usuarios',
+);
+
+// Guardar PDF en disco directamente (sin diálogo de impresora)
+final bytes = await PrintService.generatePdf(rows);
+final outputFile = File(p.join((await getDownloadsDirectory())!.path, 'reporte.pdf'));
+await outputFile.writeAsBytes(bytes);
+
+// Compartir / abrir con visor externo
+await Printing.sharePdf(
+  bytes: bytes,
+  filename: 'reporte.pdf',
+);
+```
+
+### API clave de `pw` (widgets análogos a Flutter)
+
+| Widget `pw` | Equivalente Flutter | Notas |
+|---|---|---|
+| `pw.Document()` | — | Contenedor raíz del PDF |
+| `pw.Page` / `pw.MultiPage` | — | `MultiPage` pagina automáticamente |
+| `pw.Text(s, style: pw.TextStyle(...))` | `Text` | No acepta `TextStyle` de Flutter |
+| `pw.Column` / `pw.Row` / `pw.Stack` | Equivalentes exactos | Mismo modelo de layout |
+| `pw.Container` / `pw.SizedBox` | Equivalentes exactos | — |
+| `pw.Image(MemoryImage(bytes))` | `Image.memory` | Requiere `Uint8List` |
+| `pw.Table.fromTextArray(...)` | `DataTable` | Genera tablas con cabeceras y celdas |
+| `pw.Header` | — | Cabecera estilizada de sección |
+| `pw.Divider` | `Divider` | — |
+| `PdfColors.blue800` | `Colors.blue[800]` | Paleta de colores del PDF |
+| `PdfPageFormat.a4` | — | Tamaño de página (también `letter`, `legal`, etc.) |
+
+### Cargar fuentes personalizadas
+
+```dart
+final fontData = await rootBundle.load('assets/fonts/Roboto-Regular.ttf');
+final ttf = pw.Font.ttf(fontData);
+
+pdf.addPage(pw.Page(
+  build: (ctx) => pw.Text('Hola', style: pw.TextStyle(font: ttf)),
+));
+```
+
+---
+
+**Final Directive:** If the code you generate misses opportunities to use `CarouselView.builder`, `popUntilWithResult`, `CupertinoSheet` drag handles, `RepeatingAnimationBuilder`, uses `SizedBox` for spacing, or prefixes an Enum unnecessarily, you have failed the 3.41 standard. For desktop apps, failing to use `PlatformDispatcher` for multi-window, using old community window plugins, assuming a single `devicePixelRatio` for multi-monitor setups, omitting `sqfliteFfiInit()` in desktop database apps, using `desktop_multi_window` instead of `PlatformDispatcher`, placing shortcuts only in `MenuItemButton.shortcut` without `CallbackShortcuts`, or skipping `resolveTrayIconPath()` for Windows tray icons also constitutes a failure of the 3.41 standard. Write perfect modern Dart natively tailored to the platform.
