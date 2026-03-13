@@ -384,3 +384,206 @@ await SystemChannels.window.invokeMethod('setWindowIcon', {
 | 3.38 | `CupertinoDynamicColor.withOpacity` deprecated | Use `.withValues(alpha:)` |
 | 3.38 | `OverlayPortal.targetsRootOverlay` deprecated | Use `OverlayPortalController` directly |
 | 3.41 | Material & Cupertino decoupling begins | Libraries moving to standalone packages |
+
+---
+
+## Plugin `window_manager` — Referencia Completa y Guía de Migración
+
+> **⚠️ Migration Notice (2026):** `window_manager` is being migrated to [`nativeapi-flutter`](https://github.com/libnativeapi/nativeapi-flutter), a new version based on a unified C++ core library (`libnativeapi/nativeapi`) for more complete and consistent cross-platform native API support.
+
+### SDK Native vs `window_manager` — Decision Table
+
+| Operation | Flutter SDK 3.4x Native | `window_manager` Plugin |
+|---|---|---|
+| Open secondary window | ✅ `PlatformDispatcher.requestView()` | ✅ Own API |
+| Close window | ✅ `PlatformDispatcher.closeView(viewId)` | ✅ `windowManager.close()` / `destroy()` |
+| Dynamic title | ✅ `SystemChannels.window` | ✅ `windowManager.setTitle()` |
+| Minimize / Maximize | ✅ `SystemChannels.window` | ✅ Own API |
+| Window drag | ✅ `SystemChannels.window` | ✅ `windowManager.startDragging()` |
+| Per-window runtime icons | ✅ `SystemChannels.window` | ✅ `windowManager.setIcon()` (Windows) |
+| Frameless windows | ✅ Native runner config | ✅ `setAsFrameless()` / `TitleBarStyle` |
+| **Exact screen position** | ❌ Not exposed to Dart | ✅ `setPosition(Offset)` / `getPosition()` |
+| **Minimum / Maximum size** | ❌ Not exposed to Dart | ✅ `setMinimumSize(Size)` / `setMaximumSize(Size)` |
+| **Always on top** | ❌ Not exposed to Dart | ✅ `setAlwaysOnTop(bool)` |
+| **Always on bottom** | ❌ Not exposed to Dart | ✅ `setAlwaysOnBottom(bool)` (Linux, Windows) |
+| **Lock resize** | ❌ Not exposed to Dart | ✅ `setResizable(bool)` |
+| **Lock move** | ❌ Not exposed to Dart | ✅ `setMovable(bool)` (macOS) |
+| **Center on screen** | ❌ Not exposed to Dart | ✅ `center()` / `setAlignment(Alignment)` |
+| **Query state (isMaximized, isFocused...)** | ❌ Not exposed to Dart | ✅ Fully available |
+| **Window opacity** | ❌ Not exposed to Dart | ✅ `setOpacity(double)` |
+| **Intercept close** (confirm dialog) | ❌ Not exposed to Dart | ✅ `setPreventClose(bool)` |
+| **Skip taskbar/dock** | ❌ Not exposed to Dart | ✅ `setSkipTaskbar(bool)` |
+| **Window shadow** | ❌ Not exposed to Dart | ✅ `setHasShadow(bool)` (macOS, Windows) |
+| **Taskbar progress bar** | ❌ Not exposed to Dart | ✅ `setProgressBar(double)` (macOS, Windows) |
+| **Dock badge** | ❌ Not exposed to Dart | ✅ `setBadgeLabel(String?)` (macOS) |
+| **Aspect ratio** | ❌ Not exposed to Dart | ✅ `setAspectRatio(double)` |
+| **Fullscreen** | ❌ Not exposed to Dart | ✅ `setFullScreen(bool)` |
+| **Visible on all workspaces** | ❌ Not exposed to Dart | ✅ `setVisibleOnAllWorkspaces(bool)` (macOS) |
+| **Side docking (Aero snap)** | ❌ Not exposed to Dart | ✅ `dock({side, width})` (Windows) |
+| **Mouse event pass-through** | ❌ Not exposed to Dart | ✅ `setIgnoreMouseEvents(bool, {forward})` |
+| **Edge resizing** | ❌ Not exposed to Dart | ✅ `startResizing(ResizeEdge)` (Linux, Windows) |
+| **Hide at launch** (no flash) | Manual runner config | ✅ `waitUntilReadyToShow()` pattern |
+| Window events (resize, move, focus...) | Basic `AppLifecycleListener` | ✅ Full `WindowListener` mixin |
+
+### Installation & Initialization
+
+```yaml
+dependencies:
+  window_manager: ^0.5.1
+```
+
+```dart
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await windowManager.ensureInitialized(); // Always first
+
+  WindowOptions windowOptions = WindowOptions(
+    size: Size(1280, 720),
+    center: true,
+    backgroundColor: Colors.transparent,
+    skipTaskbar: false,
+    titleBarStyle: TitleBarStyle.hidden, // For custom title bars
+  );
+
+  // Hide until Flutter is ready → prevents unstyled window flash
+  windowManager.waitUntilReadyToShow(windowOptions, () async {
+    await windowManager.show();
+    await windowManager.focus();
+  });
+
+  runApp(const MyApp());
+}
+```
+
+### Full API Reference
+
+#### Position & Size
+```dart
+await windowManager.getPosition();               // → Offset
+await windowManager.setPosition(Offset(100, 200), animate: true);
+await windowManager.center();                    // Center on active screen
+await windowManager.setAlignment(Alignment.center, animate: true);
+await windowManager.getSize();                   // → Size
+await windowManager.setSize(Size(1280, 720), animate: true);
+await windowManager.setMinimumSize(Size(800, 600));
+await windowManager.setMaximumSize(Size(1920, 1080));
+await windowManager.setAspectRatio(16 / 9);
+await windowManager.getBounds();                 // → Rect
+await windowManager.setBounds(Rect.fromLTWH(0, 0, 1280, 720));
+```
+
+#### Window State
+```dart
+await windowManager.isVisible();                 // → bool
+await windowManager.show();  await windowManager.hide();
+await windowManager.isFocused();                 // → bool (macOS, Windows)
+await windowManager.focus(); await windowManager.blur();
+await windowManager.isMaximized(); await windowManager.maximize(); await windowManager.unmaximize();
+await windowManager.isMinimized(); await windowManager.minimize(); await windowManager.restore();
+await windowManager.isFullScreen(); await windowManager.setFullScreen(true);
+```
+
+#### User Interaction Restrictions
+```dart
+await windowManager.setResizable(false);         // Disable user resize
+await windowManager.setMovable(false);           // macOS only
+await windowManager.setMinimizable(false);       // macOS, Windows
+await windowManager.setMaximizable(false);       // macOS, Windows
+await windowManager.setClosable(false);          // macOS, Windows
+```
+
+#### Appearance
+```dart
+await windowManager.setTitle('My App');
+await windowManager.setTitleBarStyle(TitleBarStyle.hidden, windowButtonVisibility: false);
+await windowManager.setAsFrameless();
+await windowManager.setBackgroundColor(Colors.transparent);
+await windowManager.setOpacity(0.95);
+await windowManager.setBrightness(Brightness.dark);
+await windowManager.setHasShadow(false);         // macOS, Windows
+```
+
+#### Z-Order & Taskbar
+```dart
+await windowManager.setAlwaysOnTop(true);
+await windowManager.setAlwaysOnBottom(true);     // Linux, Windows
+await windowManager.setSkipTaskbar(true);
+await windowManager.setProgressBar(0.75);        // macOS, Windows
+await windowManager.setBadgeLabel('99+');        // macOS dock badge
+await windowManager.setIcon('assets/app.ico');  // Windows
+await windowManager.setVisibleOnAllWorkspaces(true, visibleOnFullScreen: true); // macOS
+```
+
+#### Close Interception
+```dart
+await windowManager.setPreventClose(true);
+await windowManager.close();                     // Respects setPreventClose
+await windowManager.destroy();                   // Force close, no dialog
+```
+
+#### Advanced Actions
+```dart
+await windowManager.startDragging();             // From custom title bar widget
+await windowManager.startResizing(ResizeEdge.bottomRight); // Linux, Windows
+await windowManager.setIgnoreMouseEvents(true, forward: true); // Click-through overlay
+await windowManager.popUpWindowMenu();           // Native window context menu
+await windowManager.dock(side: DockSide.left, width: 400); // Windows Aero snap
+await windowManager.getId();                     // HWND (Windows) / window number (macOS)
+```
+
+### `WindowListener` — Full Event Mixin
+
+```dart
+class _MyState extends State<MyWidget> with WindowListener {
+  @override void initState() { super.initState(); windowManager.addListener(this); }
+  @override void dispose() { windowManager.removeListener(this); super.dispose(); }
+
+  @override void onWindowClose() {}
+  @override void onWindowFocus() { setState(() {}); } // Always call setState here
+  @override void onWindowBlur() {}
+  @override void onWindowMaximize() {}
+  @override void onWindowUnmaximize() {}
+  @override void onWindowMinimize() {}
+  @override void onWindowRestore() {}
+  @override void onWindowResize() {}
+  @override void onWindowResized() {}
+  @override void onWindowMove() {}
+  @override void onWindowMoved() {}
+  @override void onWindowEnterFullScreen() {}
+  @override void onWindowLeaveFullScreen() {}
+  @override void onWindowDocked() {}   // Windows only
+  @override void onWindowUndocked() {} // Windows only
+  @override void onWindowEvent(String eventName) {} // All events
+}
+```
+
+### Pattern: Confirm Before Close
+
+```dart
+void _init() async => await windowManager.setPreventClose(true);
+
+@override
+void onWindowClose() async {
+  if (!await windowManager.isPreventClose()) return;
+  final ok = await showDialog<bool>(
+    context: context,
+    builder: (_) => AlertDialog(
+      title: const Text('Close the app?'),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+        TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Close')),
+      ],
+    ),
+  );
+  if (ok == true) await windowManager.destroy();
+}
+```
+
+### `TitleBarStyle` Enum
+
+| Value | Effect |
+|---|---|
+| `TitleBarStyle.normal` | Native OS title bar (default) |
+| `TitleBarStyle.hidden` | Title bar hidden, window buttons still visible (macOS traffic lights) |
+
+Set `windowButtonVisibility: false` inside `setTitleBarStyle` to also hide the macOS traffic light buttons when using `TitleBarStyle.hidden`.

@@ -454,4 +454,261 @@ class CustomTitleBar extends StatelessWidget {
 
 ---
 
+## 7.14 Plugin `window_manager` — Cuándo Sigue Siendo Necesario
+
+> **⚠️ Aviso de migración (vigente a 2026):** El plugin `window_manager` está siendo migrado a [`nativeapi-flutter`](https://github.com/libnativeapi/nativeapi-flutter), una nueva versión basada en una librería C++ unificada (`libnativeapi/nativeapi`) para soporte nativo más completo y consistente entre plataformas.
+
+### Decisión SDK Nativo vs `window_manager`
+
+| Operación | SDK 3.4x Nativo | `window_manager` (plugin) |
+|---|---|---|
+| Abrir ventana secundaria | ✅ `PlatformDispatcher.requestView()` | ✅ API propia |
+| Cerrar ventana | ✅ `PlatformDispatcher.closeView(viewId)` | ✅ `windowManager.close()` |
+| Título dinámico | ✅ `SystemChannels.window` | ✅ `windowManager.setTitle()` |
+| Minimizar / Maximizar | ✅ `SystemChannels.window` | ✅ API propia |
+| Arrastrar ventana (drag) | ✅ `SystemChannels.window` | ✅ `windowManager.startDragging()` |
+| Íconos por ventana (runtime) | ✅ `SystemChannels.window` | ✅ `windowManager.setIcon()` |
+| Ventanas frameless | ✅ Config en runner nativo | ✅ `setAsFrameless()` / `TitleBarStyle` |
+| **Posición en coordenadas exactas** | ❌ No expuesto en Dart | ✅ `setPosition(Offset)` / `getPosition()` |
+| **Tamaño mínimo / máximo** | ❌ No expuesto en Dart | ✅ `setMinimumSize(Size)` / `setMaximumSize(Size)` |
+| **Always on top** | ❌ No expuesto en Dart | ✅ `setAlwaysOnTop(bool)` |
+| **Always on bottom** | ❌ No expuesto en Dart | ✅ `setAlwaysOnBottom(bool)` (Linux, Windows) |
+| **Bloquear redimensionado** | ❌ No expuesto en Dart | ✅ `setResizable(bool)` |
+| **Bloquear movimiento** | ❌ No expuesto en Dart | ✅ `setMovable(bool)` (macOS) |
+| **Centrar en pantalla** | ❌ No expuesto en Dart | ✅ `center()` / `setAlignment(Alignment)` |
+| **Consultar estado** (isMaximized, isFocused, etc.) | ❌ No expuesto en Dart | ✅ `isMaximized()`, `isFocused()`, `isVisible()` |
+| **Opacidad de ventana** | ❌ No expuesto en Dart | ✅ `setOpacity(double)` / `getOpacity()` |
+| **Interceptar cierre** (confirm before close) | ❌ No expuesto en Dart | ✅ `setPreventClose(bool)` + `onWindowClose` |
+| **Ocultar de taskbar/dock** | ❌ No expuesto en Dart | ✅ `setSkipTaskbar(bool)` |
+| **Sombra de ventana** | ❌ No expuesto en Dart | ✅ `setHasShadow(bool)` (macOS, Windows) |
+| **Barra de progreso en taskbar** | ❌ No expuesto en Dart | ✅ `setProgressBar(double)` (macOS, Windows) |
+| **Badge en dock** | ❌ No expuesto en Dart | ✅ `setBadgeLabel(String?)` (macOS) |
+| **Visible en todos los espacios de trabajo** | ❌ No expuesto en Dart | ✅ `setVisibleOnAllWorkspaces(bool)` (macOS) |
+| **Dock lateral (snap)** | ❌ No expuesto en Dart | ✅ `dock({side, width})` (Windows) |
+| **Full screen** | ❌ No expuesto en Dart | ✅ `setFullScreen(bool)` / `isFullScreen()` |
+| **Ignorar eventos de ratón** | ❌ No expuesto en Dart | ✅ `setIgnoreMouseEvents(bool, {forward})` |
+| **Resize por borde nativo** | ❌ No expuesto en Dart | ✅ `startResizing(ResizeEdge)` (Linux, Windows) |
+| **Ocultar ventana al lanzar** | Configuración manual en runner | ✅ `waitUntilReadyToShow()` patrón integrado |
+| Eventos de ventana (resize, move, focus...) | Solo `AppLifecycleListener` básico | ✅ `WindowListener` completo |
+
+**Conclusión práctica:**
+- **App multi-ventana estándar** (abrir, cerrar, título, íconos, frameless) → SDK nativo es suficiente.
+- **App con control fino de posición, tamaño, opacidad, always-on-top, interceptar cierre, o lectura de estado** → `window_manager` sigue siendo necesario.
+
+### Inicialización (obligatoria)
+
+```dart
+import 'package:flutter/material.dart';
+import 'package:window_manager/window_manager.dart';
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await windowManager.ensureInitialized(); // Siempre primer paso
+
+  WindowOptions windowOptions = WindowOptions(
+    size: Size(1280, 720),
+    center: true,
+    backgroundColor: Colors.transparent,
+    skipTaskbar: false,
+    titleBarStyle: TitleBarStyle.hidden, // Para custom title bar
+  );
+
+  // Ocultar ventana hasta que Flutter esté listo (evita flash sin estilo)
+  windowManager.waitUntilReadyToShow(windowOptions, () async {
+    await windowManager.show();
+    await windowManager.focus();
+  });
+
+  runApp(const MyApp());
+}
+```
+
+### API Completa por Categorías
+
+#### Posición y Tamaño
+```dart
+// Posición
+await windowManager.getPosition(); // → Offset
+await windowManager.setPosition(const Offset(100, 200), animate: true);
+await windowManager.center(); // Centrar en pantalla activa
+await windowManager.setAlignment(Alignment.center, animate: true);
+
+// Tamaño
+await windowManager.getSize(); // → Size
+await windowManager.setSize(const Size(1280, 720), animate: true);
+await windowManager.setMinimumSize(const Size(800, 600));
+await windowManager.setMaximumSize(const Size(1920, 1080));
+await windowManager.setAspectRatio(16 / 9);
+
+// Bounds combinados
+await windowManager.getBounds(); // → Rect
+await windowManager.setBounds(const Rect.fromLTWH(100, 100, 800, 600));
+```
+
+#### Estado de Ventana
+```dart
+// Visibilidad
+await windowManager.isVisible(); // → bool
+await windowManager.show();
+await windowManager.hide();
+
+// Foco
+await windowManager.isFocused(); // → bool (macOS, Windows)
+await windowManager.focus();
+await windowManager.blur(); // macOS, Windows
+
+// Maximizar / Minimizar / Full Screen
+await windowManager.isMaximized();         // → bool
+await windowManager.maximize();
+await windowManager.unmaximize();
+await windowManager.isMinimized();         // → bool
+await windowManager.minimize();
+await windowManager.restore();
+await windowManager.isFullScreen();        // → bool
+await windowManager.setFullScreen(true);
+```
+
+#### Restricciones de Interacción del Usuario
+```dart
+await windowManager.isResizable();         // → bool
+await windowManager.setResizable(false);   // Bloquear redimensionado
+await windowManager.isMovable();           // → bool (macOS)
+await windowManager.setMovable(false);     // Bloquear movimiento (macOS)
+await windowManager.isMinimizable();       // → bool (macOS, Windows)
+await windowManager.setMinimizable(false);
+await windowManager.isMaximizable();       // → bool (macOS, Windows)
+await windowManager.setMaximizable(false);
+await windowManager.setClosable(false);    // Deshabilitar botón cerrar (macOS, Windows)
+```
+
+#### Apariencia
+```dart
+await windowManager.setTitle('Mi App');
+await windowManager.getTitle();
+await windowManager.setTitleBarStyle(
+  TitleBarStyle.hidden,
+  windowButtonVisibility: false, // Ocultar semáforo macOS
+);
+await windowManager.getTitleBarHeight();
+await windowManager.setAsFrameless(); // Igual que TitleBarStyle.hidden
+await windowManager.setBackgroundColor(Colors.transparent);
+await windowManager.getOpacity();         // → double
+await windowManager.setOpacity(0.95);
+await windowManager.setBrightness(Brightness.dark);
+await windowManager.hasShadow();          // → bool (macOS, Windows)
+await windowManager.setHasShadow(false);  // macOS, Windows
+```
+
+#### Z-Order y Visibilidad en Sistema
+```dart
+await windowManager.isAlwaysOnTop();           // → bool
+await windowManager.setAlwaysOnTop(true);      // Flotante sobre todo
+await windowManager.isAlwaysOnBottom();         // → bool
+await windowManager.setAlwaysOnBottom(true);    // Linux, Windows
+await windowManager.isSkipTaskbar();            // → bool
+await windowManager.setSkipTaskbar(true);       // Ocultar de taskbar/dock
+await windowManager.setVisibleOnAllWorkspaces(  // macOS
+  true,
+  visibleOnFullScreen: true,
+);
+```
+
+#### Taskbar / Dock Enhancements
+```dart
+await windowManager.setProgressBar(0.75);       // Barra de progreso en taskbar (macOS, Windows)
+await windowManager.setBadgeLabel('99+');       // Badge en icono dock (macOS)
+await windowManager.setIcon('assets/icon.ico'); // Cambiar ícono (Windows)
+await windowManager.getId(); // Native window ID: HWND en Windows, window number en macOS
+```
+
+#### Cerrar e Interceptar Cierre
+```dart
+await windowManager.setPreventClose(true);  // Interceptar señal nativa de cierre
+await windowManager.isPreventClose();       // → bool
+await windowManager.close();               // Intentar cerrar (respeta setPreventClose)
+await windowManager.destroy();             // Forzar cierre sin diálogo
+```
+
+#### Acciones Avanzadas
+```dart
+await windowManager.startDragging();             // Arrastrar desde widget custom
+await windowManager.startResizing(ResizeEdge.bottomRight); // Linux, Windows
+await windowManager.setIgnoreMouseEvents(true, forward: true); // Click-through
+await windowManager.popUpWindowMenu();           // Menú contextual nativo de ventana
+
+// Docking (solo Windows)
+await windowManager.dock(side: DockSide.left, width: 400);
+await windowManager.undock();
+await windowManager.isDocked(); // → DockSide?
+
+// Linux keyboard grab
+await windowManager.grabKeyboard();
+await windowManager.ungrabKeyboard();
+```
+
+### Escuchar Eventos con `WindowListener`
+
+```dart
+class MyPage extends StatefulWidget { ... }
+
+class _MyPageState extends State<MyPage> with WindowListener {
+  @override
+  void initState() {
+    super.initState();
+    windowManager.addListener(this);
+  }
+
+  @override
+  void dispose() {
+    windowManager.removeListener(this);
+    super.dispose();
+  }
+
+  // Todos los callbacks disponibles:
+  @override void onWindowClose() {}
+  @override void onWindowFocus() { setState(() {}); } // Importante: llamar setState
+  @override void onWindowBlur() {}
+  @override void onWindowMaximize() {}
+  @override void onWindowUnmaximize() {}
+  @override void onWindowMinimize() {}
+  @override void onWindowRestore() {}
+  @override void onWindowResize() {}
+  @override void onWindowResized() {}
+  @override void onWindowMove() {}
+  @override void onWindowMoved() {}
+  @override void onWindowEnterFullScreen() {}
+  @override void onWindowLeaveFullScreen() {}
+  @override void onWindowDocked() {}    // Windows
+  @override void onWindowUndocked() {}  // Windows
+  @override void onWindowEvent(String eventName) {} // Todos los eventos
+}
+```
+
+### Patrón: Confirmar Antes de Cerrar
+
+```dart
+void _init() async {
+  await windowManager.setPreventClose(true);
+}
+
+@override
+void onWindowClose() async {
+  if (await windowManager.isPreventClose()) {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('¿Cerrar la aplicación?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
+          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Cerrar')),
+        ],
+      ),
+    );
+    if (confirmed == true) await windowManager.destroy();
+  }
+}
+```
+
+---
+
 **Final Directive:** If the code you generate misses opportunities to use `CarouselView.builder`, `popUntilWithResult`, `CupertinoSheet` drag handles, `RepeatingAnimationBuilder`, uses `SizedBox` for spacing, or prefixes an Enum unnecessarily, you have failed the 3.41 standard. For desktop apps, failing to use `PlatformDispatcher` for multi-window, using old community window plugins, or assuming a single `devicePixelRatio` for multi-monitor setups also constitutes a failure of the 3.41 standard. Write perfect modern Dart natively tailored to the platform.
