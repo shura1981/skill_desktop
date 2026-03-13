@@ -215,8 +215,7 @@ await SystemChannels.window.invokeMethod('setWindowIcon', {
 ```
 
 ### System Tray
-- Native system tray (notification area) integration is available without external plugins in SDK 3.4x.
-- Supports minimize-to-tray, tray icon menus, and tray tooltips natively via platform channels.
+- ⚠️ **Correction:** Flutter SDK 3.4x does **NOT** expose System Tray through any Dart API (`dart:ui`, `SystemChannels`, or `PlatformDispatcher`). The `tray_manager` plugin is **required** for all system tray functionality (see the full `tray_manager` section below).
 
 ---
 
@@ -587,3 +586,113 @@ void onWindowClose() async {
 | `TitleBarStyle.hidden` | Title bar hidden, window buttons still visible (macOS traffic lights) |
 
 Set `windowButtonVisibility: false` inside `setTitleBarStyle` to also hide the macOS traffic light buttons when using `TitleBarStyle.hidden`.
+
+---
+
+## Plugin `tray_manager` — System Tray (Required — Not in SDK)
+
+> **Critical correction:** Flutter SDK 3.4x does **NOT** expose System Tray via any Dart API. `tray_manager` is **mandatory** for all system tray functionality.
+
+> **⚠️ Migration Notice (2026):** Also being migrated to [`nativeapi-flutter`](https://github.com/libnativeapi/nativeapi-flutter).
+
+### Platform Support Matrix
+
+| Method | Linux | macOS | Windows |
+|---|---|---|---|
+| `setIcon` | ✅ | ✅ | ✅ |
+| `setContextMenu` | ✅ | ✅ | ✅ |
+| `destroy` | ✅ | ✅ | ✅ |
+| `setToolTip` | ➖ | ✅ | ✅ |
+| `popUpContextMenu` | ➖ | ✅ | ✅ |
+| `getBounds` | ➖ | ✅ | ✅ |
+| `setIconPosition` | ➖ | ✅ | ➖ |
+
+### Installation
+
+```yaml
+dependencies:
+  tray_manager: ^0.5.2
+```
+
+**Linux — required system dependency:**
+```bash
+sudo apt-get install libayatana-appindicator3-dev
+# or:
+sudo apt-get install appindicator3-0.1 libappindicator3-dev
+```
+
+> **GNOME (Linux):** The [AppIndicator](https://github.com/ubuntu/gnome-shell-extension-appindicator) shell extension may be required to display the tray icon in GNOME environments.
+
+### Basic Setup
+
+```dart
+import 'package:flutter/material.dart' hide MenuItem; // Important: hide MenuItem to avoid conflict
+import 'package:tray_manager/tray_manager.dart';
+
+Future<void> initTray() async {
+  await trayManager.setIcon(
+    Platform.isWindows
+        ? 'images/tray_icon.ico'  // Windows requires .ico
+        : 'images/tray_icon.png', // macOS and Linux use .png
+  );
+  await trayManager.setToolTip('My App'); // macOS and Windows only
+
+  await trayManager.setContextMenu(Menu(
+    items: [
+      MenuItem(key: 'show_window', label: 'Show Window'),
+      MenuItem.separator(),
+      MenuItem(key: 'exit_app', label: 'Exit'),
+    ],
+  ));
+}
+```
+
+### Full API
+
+```dart
+await trayManager.setIcon('images/tray.png');
+await trayManager.setIconPosition(TrayIconPositionMode.auto); // macOS only
+await trayManager.setToolTip('My App');                       // macOS, Windows
+await trayManager.setContextMenu(menu);
+await trayManager.popUpContextMenu();                         // macOS, Windows
+final Rect? bounds = await trayManager.getBounds();           // macOS, Windows
+await trayManager.destroy();
+```
+
+### `TrayListener` Mixin — All Events
+
+```dart
+class _MyState extends State<MyWidget> with TrayListener {
+  @override void initState() { super.initState(); trayManager.addListener(this); }
+  @override void dispose() { trayManager.removeListener(this); super.dispose(); }
+
+  @override void onTrayIconMouseDown() { trayManager.popUpContextMenu(); }
+  @override void onTrayIconRightMouseDown() {}
+  @override void onTrayIconRightMouseUp() {}
+  @override void onTrayMenuItemClick(MenuItem menuItem) {
+    switch (menuItem.key) {
+      case 'show_window': windowManager.show();
+      case 'exit_app': windowManager.destroy();
+    }
+  }
+}
+```
+
+### Pattern: Minimize to Tray (`tray_manager` + `window_manager`)
+
+```dart
+// Intercept close button → hide to tray instead of quitting
+@override
+void onWindowClose() async {
+  await windowManager.hide(); // Window hidden, tray icon stays active
+}
+
+// Tray icon left-click → restore window
+@override
+void onTrayIconMouseDown() => windowManager.show();
+```
+
+### Known Issues
+
+- **`app_links` conflict:** If used together, `app_links` must be `>= 6.3.3`. Older versions block event propagation and prevent tray menu item clicks from firing.
+- **GNOME (Linux):** Tray icon may not appear without the [AppIndicator extension](https://extensions.gnome.org/extension/615/appindicator-support/).

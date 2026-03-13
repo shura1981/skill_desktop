@@ -247,7 +247,7 @@ El SDK 3.4x incluye soporte nativo para las siguientes integraciones de escritor
 
 1.  **Menús del Sistema (`PlatformMenuBar`):** Menús nativos en la barra de tareas de macOS y Windows. No usar `menubar` ni paquetes basados en overlays flotantes.
 2.  **Atajos de Teclado:** `Shortcuts` y `Actions` que se propagan correctamente según qué ventana tenga el foco activo del sistema operativo.
-3.  **Bandeja del Sistema (System Tray):** API nativa para minimizar la app al área de notificación sin plugins externos.
+3.  **Bandeja del Sistema (System Tray):** ⚠️ **El SDK 3.4x NO expone System Tray en Dart.** Se requiere el plugin `tray_manager` (ver Sección 7.15).
 
 ### 7.7 Íconos Independientes por Ventana (Multi-Icon Support)
 
@@ -708,6 +708,199 @@ void onWindowClose() async {
   }
 }
 ```
+
+---
+
+## 7.15 Plugin `tray_manager` — System Tray Nativo (Necesario)
+
+> **Corrección crítica:** Contrario a lo que podría inferirse, el **SDK 3.4x NO expone System Tray** a través de ninguna API Dart nativa (`dart:ui`, `SystemChannels`, ni `PlatformDispatcher`). `tray_manager` **sigue siendo imprescindible** para cualquier funcionalidad de bandeja del sistema.
+
+> **⚠️ Migration Notice (2026):** `tray_manager` también se está migrando a [`nativeapi-flutter`](https://github.com/libnativeapi/nativeapi-flutter).
+
+### Platform Support
+
+| Feature | Linux | macOS | Windows |
+|---|---|---|---|
+| `setIcon` | ✅ | ✅ | ✅ |
+| `setContextMenu` | ✅ | ✅ | ✅ |
+| `destroy` | ✅ | ✅ | ✅ |
+| `setToolTip` | ➖ | ✅ | ✅ |
+| `popUpContextMenu` | ➖ | ✅ | ✅ |
+| `getBounds` | ➖ | ✅ | ✅ |
+| `setIconPosition` | ➖ | ✅ | ➖ |
+
+### Instalación
+
+```yaml
+dependencies:
+  tray_manager: ^0.5.2
+```
+
+**Linux — dependencia del sistema obligatoria:**
+```bash
+sudo apt-get install libayatana-appindicator3-dev
+# o bien:
+sudo apt-get install appindicator3-0.1 libappindicator3-dev
+```
+
+> **Linux/GNOME:** En entornos GNOME puede requerirse la extensión [AppIndicator](https://github.com/ubuntu/gnome-shell-extension-appindicator) para que el ícono aparezca en la bandeja.
+
+### Uso Base — Ícono + Menú Contextual
+
+```dart
+import 'package:flutter/material.dart' hide MenuItem;
+import 'package:tray_manager/tray_manager.dart';
+
+Future<void> initTray() async {
+  // El formato del ícono varía por plataforma
+  await trayManager.setIcon(
+    Platform.isWindows
+        ? 'images/tray_icon.ico'  // Windows requiere .ico
+        : 'images/tray_icon.png', // macOS y Linux usan .png
+  );
+
+  await trayManager.setToolTip('Mi Aplicación'); // macOS y Windows
+
+  final menu = Menu(
+    items: [
+      MenuItem(
+        key: 'show_window',
+        label: 'Mostrar ventana',
+      ),
+      MenuItem.separator(),
+      MenuItem(
+        key: 'exit_app',
+        label: 'Salir',
+      ),
+    ],
+  );
+  await trayManager.setContextMenu(menu);
+}
+```
+
+### Escuchar Eventos con `TrayListener`
+
+```dart
+class _MyState extends State<MyWidget> with TrayListener {
+  @override
+  void initState() {
+    super.initState();
+    trayManager.addListener(this);
+    initTray();
+  }
+
+  @override
+  void dispose() {
+    trayManager.removeListener(this);
+    super.dispose();
+  }
+
+  @override
+  void onTrayIconMouseDown() {
+    // Clic izquierdo en el ícono → mostrar/restaurar ventana
+    trayManager.popUpContextMenu(); // o windowManager.show()
+  }
+
+  @override
+  void onTrayIconRightMouseDown() {
+    // Clic derecho → generalmente el SO ya muestra el menú
+  }
+
+  @override
+  void onTrayIconRightMouseUp() {}
+
+  @override
+  void onTrayMenuItemClick(MenuItem menuItem) {
+    switch (menuItem.key) {
+      case 'show_window':
+        windowManager.show();
+      case 'exit_app':
+        windowManager.destroy();
+    }
+  }
+}
+```
+
+### API Completa
+
+```dart
+// Ícono
+await trayManager.setIcon('images/tray_icon.png');
+await trayManager.setIconPosition(TrayIconPositionMode.auto); // macOS
+
+// Tooltip (macOS, Windows)
+await trayManager.setToolTip('Mi App v2.0');
+
+// Menú
+await trayManager.setContextMenu(menu);
+await trayManager.popUpContextMenu(); // Mostrar menú programáticamente (macOS, Windows)
+
+// Geometría
+final Rect? bounds = await trayManager.getBounds(); // macOS, Windows
+
+// Destruir ícono de bandeja
+await trayManager.destroy();
+```
+
+### Patrón Completo: Minimize to Tray
+
+Combinando `window_manager` + `tray_manager` para el patrón clásico de "minimizar a la bandeja":
+
+```dart
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await windowManager.ensureInitialized();
+  // No hay ensureInitialized() en trayManager
+  runApp(const MyApp());
+}
+
+class _AppState extends State<MyApp> with TrayListener, WindowListener {
+  @override
+  void initState() {
+    super.initState();
+    trayManager.addListener(this);
+    windowManager.addListener(this);
+    _initTray();
+    _initWindow();
+  }
+
+  Future<void> _initWindow() async {
+    await windowManager.setPreventClose(true); // Interceptar cierre
+  }
+
+  Future<void> _initTray() async {
+    await trayManager.setIcon(
+        Platform.isWindows ? 'images/app.ico' : 'images/app.png');
+    await trayManager.setContextMenu(Menu(items: [
+      MenuItem(key: 'show', label: 'Mostrar'),
+      MenuItem.separator(),
+      MenuItem(key: 'quit', label: 'Salir'),
+    ]));
+  }
+
+  // Clic en ícono de bandeja → restaurar ventana
+  @override
+  void onTrayIconMouseDown() => windowManager.show();
+
+  @override
+  void onTrayMenuItemClick(MenuItem item) {
+    if (item.key == 'show') windowManager.show();
+    if (item.key == 'quit') windowManager.destroy();
+  }
+
+  // Interceptar botón cerrar → minimizar a bandeja en lugar de cerrar
+  @override
+  void onWindowClose() async {
+    await windowManager.hide(); // Ocultar ventana (no destruir)
+    // El ícono de bandeja permanece activo
+  }
+}
+```
+
+### Known Issues
+
+- **`app_links` conflict:** Si usas `app_links`, debe ser `>= 6.3.3`. Versiones anteriores bloquean la propagación de eventos e impiden que se disparen los clicks del menú de bandeja.
+- **GNOME (Linux):** El ícono puede no mostrarse sin la extensión [AppIndicator](https://extensions.gnome.org/extension/615/appindicator-support/).
 
 ---
 
