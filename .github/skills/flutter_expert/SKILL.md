@@ -1212,6 +1212,29 @@ void onTrayIconMouseDown() async {
 | Pasar datos al lanzar | `WindowConfiguration(arguments: jsonEncode({...}))` |
 | Leer args en la sub-ventana | `WindowController.fromCurrentEngine().arguments` |
 
+### Manejo del botón de cierre nativo ("X") en Sub-ventanas (Prevención de Crash)
+
+Al abrir ventanas secundarias con `desktop_multi_window` y usar `window_manager` simultáneamente, existe un problema crítico (ej. bug `#40033` en Flutter Linux). Si el usuario cierra la sub-ventana pulsando el botón nativo ("X") del SO, el sistema operativo enviará una señal de destrucción global (`delete-event`) y matará toda la aplicación principal.
+
+Para solucionarlo de forma segura, DEBES:
+1. Validar que la sub-ventana tenga acceso a sus plugins mediante el registro nativo en C++/Swift (ver *Registro nativo requerido* un poco más abajo).
+2. Interceptar físicamente la acción "X" desde el contexto de la nueva ventana en Dart.
+   ```dart
+   // Al inicializar la UI de la ventana secundaria:
+   await windowManager.ensureInitialized();
+   await windowManager.setPreventClose(true); // Obligatorio: previene que SO mate el thread
+   ```
+3. Utilizar un `WindowListener` (`window_manager`) para reaccionar a la intención de cierre, y simplemente invocar el método `hide()` del plugin `multi_window`:
+   ```dart
+   @override
+   void onWindowClose() async {
+     try {
+       final controller = await WindowController.fromCurrentEngine();
+       await controller.hide(); // Destruye visualmente el wrapper aislado
+     } catch (_) {}
+   }
+   ```
+
 ### Registro nativo requerido (por plataforma)
 
 Cada ventana nueva crea un motor Flutter independiente. Los plugins deben registrarse también en el nuevo motor mediante un callback nativo:
