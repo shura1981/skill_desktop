@@ -48,6 +48,39 @@ You are an elite, senior-level Flutter and Dart engineer. Generate, architect, r
 | Window close exits entire app | `SystemNavigator.pop()` in sub-window | Use `WindowController.fromCurrentEngine().hide()` |
 | macOS right-click tray menu does not appear | Called `popUpContextMenu()` manually | Remove manual call — macOS handles right-click automatically |
 | `sqflite` crash on desktop startup | Missing FFI init | Call `sqfliteFfiInit()` + set `databaseFactory = databaseFactoryFfi` |
+| Linux build fails on `tray_manager_plugin.cc` with deprecated API | `app_indicator_new` deprecated + `-Werror` treats warning as error | In `linux/CMakeLists.txt`, set: `target_compile_options(${TARGET} PRIVATE -Wall -Werror -Wno-error=deprecated-declarations)` |
+| Linux build fails installing native assets | `build/native_assets/linux` may not be generated in some Flutter versions | Guard install with `if(EXISTS "${NATIVE_ASSETS_DIR}") ... endif()` before `install(DIRECTORY ...)` |
+
+## Linux Build Failure (`flutter run -d linux`)
+
+When building on Linux, two issues may break compilation:
+
+1. Deprecated tray API warning promoted to error:
+
+```text
+.../tray_manager_plugin.cc:118:17: error: 'app_indicator_new' is deprecated [-Werror,-Wdeprecated-declarations]
+```
+
+2. Missing native assets directory during install:
+
+```text
+file INSTALL cannot find ".../build/native_assets/linux": No such file or directory.
+```
+
+Apply both fixes in `linux/CMakeLists.txt`:
+
+```cmake
+target_compile_options(${TARGET} PRIVATE -Wall -Werror -Wno-error=deprecated-declarations)
+
+set(NATIVE_ASSETS_DIR "${PROJECT_BUILD_DIR}native_assets/linux/")
+if(EXISTS "${NATIVE_ASSETS_DIR}")
+  install(DIRECTORY "${NATIVE_ASSETS_DIR}"
+    DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
+    COMPONENT Runtime)
+endif()
+```
+
+Result: `fvm flutter run -d linux` should build and launch successfully, even if GTK/tray runtime warnings remain.
 
 ## Mandatory Dart 3.10+ Quick Reference
 
