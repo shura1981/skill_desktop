@@ -6,87 +6,220 @@ This document catalogs **every** new widget, updated widget, new property, and A
 
 ## Multi-Window Support (3.32 / 3.35 / 3.41)
 
-### Regular Windows — Linux (3.41)
-- **New API**: `Regular Windows` implementation for Linux allows creating standard OS windows from Flutter.
-- Canonical contributed fixes for accessibility, app lifecycle, focus traversal, and input events in multi-window contexts.
+> **⚠️ ESTADO en Stable 3.41 — LEER ANTES DE CONTINUAR**
+>
+> Las APIs nativas de multi-window (`RegularWindowController`, `DialogWindowController`, `TooltipWindowController`, `PopupWindowController`) **existen en el SDK pero son `@internal`** y están protegidas por un feature flag:
+> ```dart
+> bool isWindowingEnabled = debugEnabledFeatureFlags.contains('windowing');
+> ```
+> **No están disponibles en el canal `stable`.** Solo accesibles en canal `main` con flag experimental.
+>
+> **Para proyectos en stable 3.41: usa `desktop_multi_window: ^0.3.0`** (plugin de producción, arquitectura multi-engine).
 
-### Dialog Windows — Windows Win32 (3.41)
-- **New API**: Native dialog windows implemented for the Windows platform.
+### Regular Windows — Linux (3.41) [Experimental/Internal]
+- **Estado:** Implementación lista internamente para Linux, marcada `@internal`. Requiere canal `main` + feature flag.
+- Canonical contribuyó fixes de accessibility, app lifecycle, focus traversal e input events en contextos multi-window.
 
-### Popup / Dialog / Tooltip Windows (3.41)
-- Flutter 3.41 officially supports **multi-window popups**, **dialogs**, and **tooltip windows** natively on Windows, macOS, and Linux. Community plugins for multi-window are no longer necessary.
+### Dialog Windows — Windows Win32 (3.41) [Experimental/Internal]
+- **Estado:** Native dialog windows implementadas internamente para Win32, aún `@internal`.
+
+### Popup / Dialog / Tooltip Windows (3.41) [Experimental/Internal]
+- Las APIs de popups, diálogos y tooltips multi-window **existen en el SDK** pero siguen siendo `@internal`.
+- **Para stable 3.41:** El plugin `desktop_multi_window: ^0.3.0` provee soporte completo de producción.
 
 ### Desktop Multi-Window Progress (3.32)
-- Significant progress in multi-window support across desktop platforms. Canonical addressed issues related to:
-  - Accessibility in multi-window contexts
-  - App lifecycle management across windows
-  - Focus traversal between windows
-  - Input event handling across multiple surfaces
+- Progreso significativo en soporte multi-window. Canonical resolvió:
+  - Accessibility en contextos multi-window
+  - App lifecycle management entre ventanas
+  - Focus traversal entre ventanas
+  - Input event handling en múltiples surfaces
 
 ---
 
-## Multi-Window Architecture — Single Isolate (3.4x Deep Dive)
+## Multi-Window Architecture — Plugin Stable: `desktop_multi_window` (3.41)
 
-### Architecture Principle
-- All windows in a Flutter 3.4x desktop app share a **single Dart Isolate** and a single engine instance. There is **no separate process or serialization** between windows.
-- This is a fundamental departure from community plugins (`multi_window_manager`, `bitsdojo_window`, etc.) which spawn separate engine instances per window.
-- **Consequence:** Any state manager (Riverpod, Bloc, Signals) works cross-window out of the box. A `Stream` update in Window A immediately rebuilds widgets in Window B.
+### Arquitectura: Multi-Engine (Una engine Flutter por ventana)
+- `desktop_multi_window: ^0.3.0` crea una **engine Flutter independiente por cada ventana**.
+- Cada ventana es un proceso nativo separado de Flutter con su propio aislado Dart.
+- La comunicación entre ventanas se realiza via `WindowMethodChannel` (JSON sobre Method Channels nativos).
+- **Consecuencia:** El estado NO se comparte directamente. Usa `WindowMethodChannel` para sincronizar por eventos.
 
-### `PlatformDispatcher` — Core API
-- `PlatformDispatcher.instance.requestView()` — Opens a new native OS window and returns its `viewId`.
-- `PlatformDispatcher.instance.closeView(int viewId)` — Destroys the view. Never close `viewId == 0` (main window).
-- `PlatformDispatcher.instance.views` — Iterable of all currently open `FlutterView`s.
+> **⚠️ DIFERENCIA CON EL API EXPERIMENTAL:**  
+> El API `@internal` del SDK apunta a una arquitectura single-isolate (un engine compartido).  
+> Esa arquitectura **no está disponible en stable**. En stable, cada ventana = engine separada.
 
+### Setup: `pubspec.yaml`
+```yaml
+dependencies:
+  desktop_multi_window: ^0.3.0
+```
+
+### `main.dart` — Bootstrap Multi-Ventana
 ```dart
-import 'dart:ui';
+import 'package:desktop_multi_window/desktop_multi_window.dart';
+import 'package:flutter/material.dart';
 
-// Open a new window
-void openWindow() {
-  PlatformDispatcher.instance.requestView();
+Future<void> main(List<String> args) async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  // Detectar si somos ventana principal o sub-ventana
+  if (args.firstOrNull == 'multi_window') {
+    final windowController = await WindowController.fromCurrentEngine();
+    final argsJson = windowController.arguments;
+    final config = argsJson != null ? jsonDecode(argsJson) as Map<String, dynamic> : <String, dynamic>{};
+    
+    runApp(SubWindowApp(config: config, controller: windowController));
+    return;
+  }
+
+  runApp(const MainApp());
+}
+```
+
+### `WindowController.create()` — Abrir Nueva Ventana
+```dart
+import 'package:desktop_multi_window/desktop_multi_window.dart';
+
+Future<void> openFormWindow() async {
+  final controller = await WindowController.create(
+    WindowConfiguration(
+      title: 'Nueva Persona',
+      size: const Size(600, 450),
+      hiddenAtLaunch: true, // Evita parpadeo al posicionar/configurar
+      arguments: jsonEncode({'type': 'form', 'title': 'Nueva Persona'}),
+    ),
+  );
+  await controller.setFrame(const Rect.fromLTWH(200, 200, 600, 450));
+  await controller.show();
+}
+```
+
+### `WindowMethodChannel` — Comunicación Entre Ventanas
+```dart
+// Canal compartido (mismo nombre en ambas ventanas)
+const _syncChannel = WindowMethodChannel(
+  'app/sync',
+  mode: ChannelMode.unidirectional, // Sin respuesta de vuelta
+);
+
+// En la ventana principal — escuchar mensajes de sub-ventanas
+void initSyncListener() {
+  _syncChannel.setMethodCallHandler((call) async {
+    if (call.method == 'recordSaved') {
+      ref.invalidate(recordsProvider); // Refrescar datos
+    }
+  });
 }
 
-// Close a secondary window safely
-void closeWindow(int viewId) {
-  if (viewId != 0) {
-    PlatformDispatcher.instance.closeView(viewId);
+// En la sub-ventana — notificar a la ventana principal
+Future<void> onSave() async {
+  await _persistRecord();
+  await _syncChannel.invokeMethod('recordSaved');
+  await _closeWindow();
+}
+```
+
+### `WindowController.fromCurrentEngine()` — Control de la Ventana Actual
+```dart
+// ✅ CORRECTO — cerrar sub-ventana
+Future<void> _closeWindow() async {
+  final controller = await WindowController.fromCurrentEngine();
+  await controller.hide(); // O controller.close()
+}
+
+// ❌ INCORRECTO — mata todo el proceso en desktop
+// SystemNavigator.pop();
+```
+
+### `WindowController.getAll()` — Listar Todas las Ventanas
+```dart
+Future<void> closeAllSecondaryWindows() async {
+  final windows = await WindowController.getAll();
+  for (final w in windows) {
+    // windowId == 0 es la ventana principal
+    if (w.windowId != 0) await w.close();
   }
 }
 ```
 
-### Route Content by `viewId`
-- Use `View.of(context).viewId` as the discriminator inside `MaterialApp.builder` to render different widget trees per window:
+### `WindowConfiguration` — Parámetros de Creación
 
-```dart
-MaterialApp(
-  builder: (context, child) {
-    return switch (View.of(context).viewId) {
-      0 => const MainWindow(),
-      1 => const ToolPanelWindow(),
-      _ => const GenericWindow(),
-    };
-  },
-);
+| Propiedad | Tipo | Descripción |
+|---|---|---|
+| `title` | `String?` | Título en la barra del OS |
+| `size` | `Size?` | Tamaño inicial de la ventana |
+| `hiddenAtLaunch` | `bool` | `true` para posicionar antes de mostrar |
+| `arguments` | `String?` | JSON para pasar a la nueva ventana |
+
+### Registro de Plugins en Sub-Ventanas (Linux/macOS)
+```cpp
+// linux/runner/my_application.cc — Registrar plugins en Flutter Engine
+#include "generated_plugin_registrant.h"
+
+static void my_application_activate(GApplication* application) {
+  // El plugin desktop_multi_window crea engines adicionales;
+  // asegurarse de llamar RegisterPlugins en cada engine creado.
+  RegisterPlugins(fl_engine);
+}
 ```
 
-### `SystemChannels.window` — Runtime Window Control
-All per-window operations are invoked via `SystemChannels.window.invokeMethod(method, {'id': viewId, ...})`:
+### Pattern Completo: Ventana Principal + Sub-Ventana
 
-| Method | Description |
-|---|---|
-| `setWindowTitle` | Change the OS title bar text for a specific window |
-| `setWindowIcon` | Set a distinct taskbar/dock icon for a specific window |
-| `minimize` | Minimize a specific window to the taskbar |
-| `maximize` | Maximize/restore a specific window |
-| `startDragging` | Begin native OS drag of window (for frameless title bars) |
+```dart
+// lib/windows/main_window.dart
+class MainWindow extends ConsumerStatefulWidget { ... }
+class _MainWindowState extends ConsumerState<MainWindow> {
+  final _syncChannel = const WindowMethodChannel('app/sync', mode: ChannelMode.unidirectional);
 
-### Performance: Native SDK vs Legacy Plugins
+  @override
+  void initState() {
+    super.initState();
+    _syncChannel.setMethodCallHandler((call) async {
+      if (call.method == 'recordSaved') ref.invalidate(recordsProvider);
+    });
+  }
 
-| Metric | Legacy Plugins | Native SDK 3.4x |
+  Future<void> _openFormWindow() async {
+    final controller = await WindowController.create(
+      WindowConfiguration(
+        title: 'Nuevo Registro',
+        hiddenAtLaunch: true,
+        arguments: jsonEncode({'type': 'form'}),
+      ),
+    );
+    await controller.setFrame(const Rect.fromLTWH(300, 200, 600, 450));
+    await controller.show();
+  }
+}
+
+// lib/windows/form_window.dart
+class FormWindow extends ConsumerStatefulWidget { ... }
+class _FormWindowState extends ConsumerState<FormWindow> {
+  final _syncChannel = const WindowMethodChannel('app/sync', mode: ChannelMode.unidirectional);
+  final bool isDesktopSubWindow;
+
+  Future<void> _onSave() async {
+    await ref.read(saveRecordProvider.notifier).save();
+    if (isDesktopSubWindow) {
+      await _syncChannel.invokeMethod('recordSaved');
+      final controller = await WindowController.fromCurrentEngine();
+      await controller.hide();
+    } else {
+      Navigator.of(context).pop(); // Fallback para modo navegación clásica
+    }
+  }
+}
+```
+
+### Performance: Plugin Stable vs API Experimental (cuando esté disponible)
+
+| Métrica | `desktop_multi_window` (Stable) | API Nativa (Experimental, no stable) |
 |---|---|---|
-| Window open time | ~1.5 s | ~100 ms |
-| CPU usage (idle) | 2–5% per window | < 0.5% global |
-| Cross-window communication | Async (Method Channels + JSON) | Synchronous (direct memory reference) |
-| Hot Reload | Manual per engine | Unified (one click, all windows) |
+| Tiempo de apertura | ~800 ms - 1.5 s | ~100 ms (proyectado) |
+| CPU idle por ventana | 2–5% por engine | < 0.5% global (proyectado) |
+| Comunicación cross-window | Async JSON (Method Channels) | Sincrónico (memoria compartida) |
+| Disponibilidad en stable | ✅ `desktop_multi_window ^0.3.0` | ❌ Solo canal `main` + feature flag |
+| Hot Reload | Manual por engine | Unificado (proyectado) |
 
 ---
 
@@ -132,9 +265,12 @@ class CustomTitleBar extends StatelessWidget {
               ),
               IconButton(
                 icon: const Icon(Icons.close, color: Colors.redAccent),
-                onPressed: () => viewId == 0
-                    ? SystemNavigator.pop()
-                    : PlatformDispatcher.instance.closeView(viewId),
+                onPressed: () async {
+                  // ✅ CORRECTO: Para sub-ventanas (plugin desktop_multi_window)
+                  // Para ventana principal, cerrar con window_manager o SystemNavigator
+                  final controller = await WindowController.fromCurrentEngine();
+                  await controller.hide();
+                },
               ),
             ]),
           ],
@@ -765,21 +901,22 @@ void onTrayIconMouseDown() async {
 
 ---
 
-## `desktop_multi_window` — ⛔ OBSOLETE in SDK 3.4x
+## `desktop_multi_window` — ✅ REQUERIDO en Stable 3.41
 
-> **Do not use in new projects.** `desktop_multi_window` creates **separate Flutter engines** per window (independent processes), meaning no shared state, JSON-serialized IPC, and higher resource cost.
+> **Usa este plugin para multi-window en producción.** Las APIs nativas del SDK (`RegularWindowController`, etc.) son `@internal` y solo accesibles en canal `main` con feature flag experimental.
 >
-> **Replaced by:** `PlatformDispatcher.instance.requestView()` (SDK 3.4x native, single shared Isolate — see Multi-Window Architecture section above).
+> `desktop_multi_window: ^0.3.0` es la solución de producción para Flutter stable 3.41.
 
-Migration guide for legacy code:
+Arquitectura: **engine Flutter independiente por ventana** (multi-process). Comunicación via `WindowMethodChannel`.
 
-| `desktop_multi_window` (obsolete) | SDK 3.4x Native |
+| `desktop_multi_window` (Stable) | API Nativa SDK (Experimental — NO disponible en stable) |
 |---|---|
-| `DesktopMultiWindow.createWindow(args)` | `PlatformDispatcher.instance.requestView()` |
-| `WindowController.fromWindowId(id)` | `View.of(context)` inside the target view |
-| JSON IPC between windows | Direct memory access (same Isolate) |
-| `controller.invokeMethod('refresh')` | `ref.invalidate(provider)` / `stream.add(event)` |
-| `WindowController.fromCurrentEngine().hide()` | `PlatformDispatcher.instance.closeView(viewId)` |
+| `WindowController.create(WindowConfiguration(...))` | `RegularWindowController()` — `@internal` |
+| `WindowController.fromCurrentEngine()` | — no equivalente en stable |
+| `WindowMethodChannel('name', mode: ChannelMode.unidirectional)` | Estado compartido directo (proyectado) |
+| `controller.hide()` / `controller.close()` | `PlatformDispatcher.instance.closeView(viewId)` — NO existe en stable |
+| `WindowController.getAll()` | `PlatformDispatcher.instance.views` — solo accesible via `@internal` |
+| `WindowConfiguration(arguments: jsonEncode({...}))` | Constructor `@internal` con parámetros distintos |
 
 ---
 
