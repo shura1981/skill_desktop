@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:window_manager/window_manager.dart';
 
 import '../models/user.dart';
 import '../services/user_repository.dart';
@@ -99,55 +100,7 @@ class _HomePageState extends State<HomePage> {
     return Scaffold(
       body: Column(
         children: [
-          MenuBar(
-            children: [
-              SubmenuButton(
-                menuChildren: [
-                  MenuItemButton(onPressed: () => _showUserForm(), child: const Text('Nuevo')),
-                  MenuItemButton(onPressed: _openSearch, child: const Text('Buscar')),
-                  MenuItemButton(
-                    onPressed: () async {
-                      await showThemeSettingsDialog(context, settings);
-                    },
-                    child: const Text('Configuración'),
-                  ),
-                ],
-                child: const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 8, vertical: 10),
-                  child: Text('Edición'),
-                ),
-              ),
-              SubmenuButton(
-                menuChildren: [
-                  MenuItemButton(
-                    onPressed: () {
-                      showAboutDialog(
-                        context: context,
-                        applicationName: 'Flutter Desktop Demo',
-                        applicationVersion: '1.0.0',
-                        children: const [Text('Aplicación de ejemplo con SQLite y tray.')],
-                      );
-                    },
-                    child: const Text('Acerca de'),
-                  ),
-                  MenuItemButton(
-                    onPressed: () {
-                      showLicensePage(
-                        context: context,
-                        applicationName: 'Flutter Desktop Demo',
-                        applicationVersion: '1.0.0',
-                      );
-                    },
-                    child: const Text('Licencias'),
-                  ),
-                ],
-                child: const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 8, vertical: 10),
-                  child: Text('Ayuda'),
-                ),
-              ),
-            ],
-          ),
+          _buildTitleBar(context, settings),
           Expanded(
             child: Padding(
               padding: const EdgeInsets.all(12),
@@ -162,6 +115,119 @@ class _HomePageState extends State<HomePage> {
         onPressed: () => _showUserForm(),
         icon: const Icon(Icons.add),
         label: const Text('Nuevo usuario'),
+      ),
+    );
+  }
+
+  Widget _buildTitleBar(BuildContext context, SettingsService settings) {
+    final theme = Theme.of(context);
+    return GestureDetector(
+      onPanStart: (_) => windowManager.startDragging(),
+      child: Container(
+        height: 44,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        color: theme.colorScheme.surfaceContainerHighest,
+        child: Row(
+          children: [
+            const Text('Mi App de Escritorio', style: TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(width: 20),
+            _buildMenuButton(
+              context: context,
+              label: 'Edición',
+              items: [
+                PopupMenuItem(
+                  value: 'nuevo',
+                  child: const Text('Nuevo'),
+                ),
+                PopupMenuItem(
+                  value: 'buscar',
+                  child: const Text('Buscar'),
+                ),
+                const PopupMenuDivider(),
+                PopupMenuItem(
+                  value: 'configurar',
+                  child: const Text('Configuración'),
+                ),
+              ],
+              onSelected: (value) async {
+                switch (value) {
+                  case 'nuevo':
+                    _showUserForm();
+                    break;
+                  case 'buscar':
+                    _openSearch();
+                    break;
+                  case 'configurar':
+                    await showThemeSettingsDialog(context, settings);
+                    break;
+                }
+              },
+            ),
+            const SizedBox(width: 8),
+            _buildMenuButton(
+              context: context,
+              label: 'Ayuda',
+              items: [
+                PopupMenuItem(
+                  value: 'acerca',
+                  child: const Text('Acerca de'),
+                ),
+                PopupMenuItem(
+                  value: 'licencias',
+                  child: const Text('Licencias'),
+                ),
+              ],
+              onSelected: (value) {
+                switch (value) {
+                  case 'acerca':
+                    showAboutDialog(
+                      context: context,
+                      applicationName: 'Flutter Desktop Demo',
+                      applicationVersion: '1.0.0',
+                      children: const [Text('Aplicación de ejemplo con SQLite y tray.')],
+                    );
+                    break;
+                  case 'licencias':
+                    showLicensePage(
+                      context: context,
+                      applicationName: 'Flutter Desktop Demo',
+                      applicationVersion: '1.0.0',
+                    );
+                    break;
+                }
+              },
+            ),
+            const Spacer(),
+            IconButton(
+              tooltip: 'Minimizar',
+              icon: const Icon(Icons.minimize),
+              onPressed: () => windowManager.minimize(),
+            ),
+            IconButton(
+              tooltip: 'Cerrar',
+              icon: const Icon(Icons.close),
+              onPressed: () => windowManager.close(),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMenuButton({
+    required BuildContext context,
+    required String label,
+    required List<PopupMenuEntry<String>> items,
+    required void Function(String) onSelected,
+  }) {
+    return PopupMenuButton<String>(
+      tooltip: label,
+      offset: const Offset(0, 38),
+      itemBuilder: (_) => items,
+      onSelected: onSelected,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+        child: Text(label, style: Theme.of(context).textTheme.bodyMedium),
       ),
     );
   }
