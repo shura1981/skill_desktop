@@ -2,7 +2,7 @@
 
 Este documento contiene patrones extraídos de un proyecto real de escritorio Flutter (`multi_window_app`). Su propósito es servir como guía de referencia rápida y boilerplate reutilizable. Cada sección muestra código de producción probado.
 
-> **Nota sobre versiones:** Los patrones aquí documentados son para Flutter 3.41. El plugin `desktop_multi_window` **ha sido eliminado** de esta guía porque está obsoleto desde SDK 3.4x — reemplazado íntegramente por `PlatformDispatcher.instance.requestView()`.
+> **Nota sobre versiones:** Los patrones aquí documentados son para Flutter **stable 3.41**. El plugin `desktop_multi_window: ^0.3.0` **es la solución correcta para multi-window en stable**. Las APIs nativas del SDK (`RegularWindowController`, etc.) son `@internal` y requieren canal `main` + feature flag experimental — **no disponibles en stable**.
 
 ---
 

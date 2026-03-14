@@ -1,6 +1,7 @@
 ---
 name: flutter_expert
 description: The definitive Flutter & Dart technical guide. Enforces strict compliance with Flutter 3.41, Impeller optimizations, exhaustive Cupertino parity, iOS/Android platform interop paradigms, WebAssembly targets, and modern Dart 3.10+ syntax. Features exhaustive knowledge from versions 3.27 through 3.41.
+license: Apache-2.0
 ---
 
 # 🚀 Flutter Master Engineer Guidelines (v3.41 Standard)
@@ -8,6 +9,49 @@ description: The definitive Flutter & Dart technical guide. Enforces strict comp
 You are an elite, senior-level Flutter and Dart engineer. Your primary mandate is to generate, architect, review, and refactor code strictly according to **Flutter 3.41** and **Dart 3.x** standards.
 
 You must abandon outdated practices, aggressively adopt highly optimized modern syntax, and design software taking full advantage of the underlying engine improvements (Impeller) and the absolute latest framework widgets introduced from version 3.27 up to 3.41.
+
+## When to Use This Skill
+
+Use this skill when the user asks for any of the following:
+
+* Flutter architecture, refactors, or code generation constrained to Flutter 3.27-3.41.
+* Desktop multi-window behavior (stable vs experimental), native menu bars, tray, and window lifecycle.
+* Cross-platform widget selection (mobile, desktop, web) with up-to-date APIs.
+* Migration away from deprecated Flutter/Dart patterns to modern equivalents.
+* Performance-sensitive UI decisions related to Impeller and platform rendering behavior.
+
+## Prerequisites
+
+Before applying recommendations from this skill:
+
+* Confirm Flutter channel/version and target platform (Windows/macOS/Linux/iOS/Android/Web).
+* For desktop multi-window in stable, use `desktop_multi_window: ^0.3.0`.
+* Treat native SDK windowing APIs as experimental unless the project explicitly uses channel `main` and feature flag `windowing`.
+* Validate third-party plugin availability and platform support in `pubspec.yaml`.
+
+## Step-by-Step Workflows
+
+1. Identify platform and runtime constraints (stable vs main channel, desktop vs mobile vs web).
+2. Consult the appropriate platform catalog in `templates/`.
+3. Select modern APIs first; avoid deprecated or legacy patterns.
+4. Apply platform-safe implementation details (especially desktop window lifecycle and file-drop behavior).
+5. Verify behavior with production-safe fallbacks when APIs are experimental.
+
+## Troubleshooting
+
+| Problem | Cause | Action |
+|---|---|---|
+| Multi-window code compiles in docs but fails in stable | API is `@internal`/experimental | Switch to `desktop_multi_window` for stable builds |
+| Drag and drop works in one window but not cross-window | Using SDK `Draggable`/`DragTarget` across engines | Use `desktop_drop` or `super_drag_and_drop` |
+| Window close exits full app | `SystemNavigator.pop()` used in desktop sub-window | Use `WindowController.fromCurrentEngine().hide()` |
+| Desktop window controls missing advanced behavior | SDK lacks full Dart exposure | Use `window_manager` where needed |
+
+## References
+
+* [desktop widgets catalog](templates/desktop_widgets.md)
+* [desktop project patterns](templates/desktop_project_patterns.md)
+* [mobile widgets catalog](templates/mobile_widgets.md)
+* [web widgets catalog](templates/web_widgets.md)
 
 ---
 
@@ -32,7 +76,7 @@ When solving problems or writing new UI components, you **must** use these speci
 ### 🟢 Core Routing & API Methods
 *   **`Navigator.popUntilWithResult` (3.41):** You MUST use this new API when needing to pop multiple screens and return a value to the destination route. Never use complex state-management hacks or nested `pop` chains to achieve this anymore.
 *   **`OptionsViewOpenDirection.mostSpace` (3.41):** When implementing `RawAutocomplete`, always configure it with the `mostSpace` open direction so dropdowns automatically handle screen boundary collisions.
-*   **Desktop Native Multi-Window (3.41):** Flutter officially supports multi-window popups, dialogs, and tooltips on Windows, macOS, and Linux natively. Do not use legacy community plugins for secondary window generation.
+*   **Desktop Native Multi-Window (3.41 — ⚠️ EXPERIMENTAL, canal main únicamente):** Flutter 3.41 introdujo clases nativas (`RegularWindowController`, `DialogWindowController`, `TooltipWindowController`, `PopupWindowController`) para multi-ventana en Windows, macOS y Linux. **Sin embargo, en Flutter stable 3.41 estas APIs están marcadas como `@internal` y requieren añadir la feature flag `windowing` y usar el canal `main`.** En producción sobre Flutter stable, sigue siendo necesario usar el plugin `desktop_multi_window: ^0.3.0`. Nunca generes código que llame a `PlatformDispatcher.instance.requestView()` — ese método no existe en la API pública estable.
 *   **Widget Previews (`@Preview()`) (3.38 / 3.41):** Implement `@Preview()` annotations on all standalone UI components so they render in the IDE's Widget Previewer. Make sure to define `MultiPreviews` where applicable.
 *   **`OverlayPortal` (3.38):** Rely heavily on `OverlayPortal` for tooltips or custom dropdowns. The `OverlayPortal.targetsRootOverlay` constructor has been deprecated; use explicit `OverlayPortalController` logic.
 
@@ -148,45 +192,97 @@ The `templates/` directory contains exhaustive, version-by-version documentation
 
 Esta sección contiene la referencia técnica exhaustiva para el desarrollo de aplicaciones de escritorio de alto rendimiento en Flutter, cubriendo la arquitectura Multi-View nativa, APIs de integración con el sistema operativo y personalización avanzada de ventanas.
 
-### 7.1 Arquitectura Multi-View Nativa con `PlatformDispatcher`
+> **⚠️ ESTADO EN FLUTTER 3.41 STABLE (CRÍTICO — LEER ANTES DE GENERAR CÓDIGO):**
+> La API de windowing nativa (`RegularWindowController`, `DialogWindowController`, etc.) existe en el código fuente de Flutter 3.41 en `lib/src/widgets/_window.dart`, pero **todas las clases están marcadas `@internal`** y protegidas por un feature flag experimental. Para usarlas se requiere:
+> 1. Cambiar al canal `main` (`flutter channel main`)
+> 2. Activar el flag: `debugEnabledFeatureFlags.add('windowing')`
+>
+> **En Flutter stable 3.41, la multi-ventana production-ready sigue requiriendo el plugin `desktop_multi_window: ^0.3.0`.** No generes código con `PlatformDispatcher.instance.requestView()` ni `PlatformDispatcher.instance.closeView()` para stable — esas funciones no existen en la API pública.
 
-A diferencia de los plugins heredados, el soporte nativo utiliza un **Single Isolate**. Esto significa que todas las ventanas comparten la misma instancia de la aplicación en memoria, sin serialización JSON ni canales de mensajes entre ventanas.
+### 7.1 Estado de la Windowing API por Canal
 
-*   **Regla Imperativa:** Nunca usar plugins como `multi_window_manager` o `bitsdojo_window` para operaciones básicas de apertura/cierre de ventanas. El SDK 3.4x lo gestiona nativamentea través de `PlatformDispatcher`.
+| Característica | Flutter stable 3.41 | Flutter main (experimental) |
+|---|---|---|
+| `RegularWindowController.create()` | ❌ `@internal` + feature flag | ✅ Con `debugEnabledFeatureFlags.add('windowing')` |
+| `DialogWindowController.create()` | ❌ `@internal` + feature flag | ✅ Con feature flag |
+| `TooltipWindowController` | ❌ `@internal` + feature flag | ✅ Con feature flag |
+| `PopupWindowController` | ❌ `@internal` + feature flag | ✅ Con feature flag |
+| `desktop_multi_window ^0.3.0` | ✅ **Recomendado para producción** | ✅ Alternativa |
+
+#### Patrón correcto para Flutter stable 3.41 (producción)
 
 ```dart
-import 'dart:ui';
-import 'package:flutter/material.dart';
+// pubspec.yaml: desktop_multi_window: ^0.3.0
+import 'package:desktop_multi_window/desktop_multi_window.dart';
+import 'dart:convert';
 
-// Abrir una nueva ventana nativa
-void abrirVentana() {
-  PlatformDispatcher.instance.requestView();
+// Abrir ventana secundaria (cada ventana es un motor Flutter separado)
+Future<void> abrirVentana() async {
+  final controller = await WindowController.create(
+    WindowConfiguration(
+      hiddenAtLaunch: true,
+      arguments: jsonEncode({'type': 'form', 'title': 'Nueva ventana'}),
+    ),
+  );
+  await controller.show();
 }
 
-// Cerrar una ventana específica por su viewId
-void cerrarVentana(int viewId) {
-  if (viewId != 0) { // Nunca cerrar la ventana principal (id: 0)
-    PlatformDispatcher.instance.closeView(viewId);
-  }
+// Cerrar desde dentro de la sub-ventana (NO usar SystemNavigator.pop())
+Future<void> cerrarVentanaActual() async {
+  final controller = await WindowController.fromCurrentEngine();
+  await controller.hide(); // hide en lugar de destroy para evitar crash
 }
 ```
 
-### 7.2 Widget Tree Multi-Window: Enrutamiento por `viewId`
-
-Para que cada ventana muestre contenido distinto, utiliza `View.of(context).viewId` como discriminador en el `MaterialApp`. Este es el patrón canónico en 3.4x:
+#### Patrón para Flutter main + windowing feature flag (experimental, no producción)
 
 ```dart
+// Solo disponible en canal main con feature flag activado
+import 'package:flutter/src/widgets/_window.dart'; // ⚠️ @internal
+// NUNCA importar en producción — breaking changes en patch versions
+```
+
+> **Nota arquitectural importante:** A diferencia del SDK nativo experimental (single isolate), `desktop_multi_window` crea un motor Flutter **separado por ventana**. Esto implica que el estado no se comparte automáticamente — se requiere `WindowMethodChannel` para sincronizar entre ventanas. La API nativa futura eliminará esta limitación.
+
+### 7.2 Widget Tree Multi-Window: Enrutamiento por argumentos (stable) o `viewId` (experimental)
+
+**En stable con `desktop_multi_window`:** cada ventana es un motor independiente; se distinguen por los argumentos JSON pasados en `WindowConfiguration`.
+
+```dart
+// main.dart — bootstrap multi-window (stable, desktop_multi_window)
+Future<void> main(List<String> args) async {
+  WidgetsFlutterBinding.ensureInitialized();
+  // Cada ventana es un proceso Flutter separado con sus propios args
+  final windowController = await WindowController.fromCurrentEngine();
+  final rawArgs = windowController.arguments; // JSON string
+  final config = rawArgs.isNotEmpty
+      ? jsonDecode(rawArgs) as Map<String, dynamic>
+      : <String, dynamic>{};
+
+  final windowType = config['type'] as String? ?? 'main';
+
+  runApp(ProviderScope(
+    child: switch (windowType) {
+      'form' => FormWindowPage(title: config['title'] as String? ?? ''),
+      _ => const MainWindowPage(),
+    },
+  ));
+}
+```
+
+**En experimental (canal main + feature flag) con Windowing API nativa:** se usa `View.of(context).viewId` porque todas las ventanas comparten un único isolate:
+
+```dart
+// ⚠️ Solo válido en canal main con windowing feature flag
+// NO usar en producción stable
 class MultiWindowRoot extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       builder: (context, child) {
         final viewId = View.of(context).viewId;
-
         return switch (viewId) {
           0 => const MainWindow(),
-          1 => const ToolPanelWindow(),
-          2 => const PreviewWindow(),
           _ => const GenericSecondaryWindow(),
         };
       },
@@ -195,52 +291,59 @@ class MultiWindowRoot extends StatelessWidget {
 }
 ```
 
-### 7.3 APIs de Ventana Avanzadas (Sin Plugins Externos)
+### 7.3 Comunicación Entre Ventanas (stable: `WindowMethodChannel`)
 
-#### Título dinámico por ventana
+Con `desktop_multi_window` en stable, cada ventana es un motor aislado. La comunicación se hace mediante `WindowMethodChannel`:
+
 ```dart
-import 'package:flutter/services.dart';
+import 'package:desktop_multi_window/desktop_multi_window.dart';
 
-void updateWindowTitle(BuildContext context, String title) {
-  final viewId = View.of(context).viewId;
-  SystemChannels.window.invokeMethod('setWindowTitle', {
-    'id': viewId,
-    'title': title,
+// Canal de sincronización (compartido entre ventana principal y sub-ventanas)
+const _syncChannel = WindowMethodChannel(
+  'app/sync',
+  mode: ChannelMode.unidirectional,
+);
+
+// En la sub-ventana: notificar a la principal después de guardar
+Future<void> notificarGuardado() async {
+  try {
+    await _syncChannel.invokeMethod('datoGuardado');
+  } catch (_) {
+    // Canal no disponible — no bloquear el flujo
+  }
+}
+
+// En la ventana principal: escuchar notificaciones
+void initState() {
+  super.initState();
+  _syncChannel.setMethodCallHandler((call) async {
+    if (call.method == 'datoGuardado') {
+      ref.invalidate(miProvider); // Riverpod refresh
+    }
+    return null;
   });
 }
 ```
 
-#### Drag and Drop nativo inter-ventana
-El motor gráfico unificado permite arrastrar datos entre ventanas de la misma app con `Draggable`/`DragTarget` sin bridges adicionales:
-```dart
-Draggable(
-  data: myData,
-  feedback: Material(child: Text("Arrastrando...")),
-  child: MyWidget(),
-);
+### 7.4 Estado Global y Sincronización (stable vs experimental)
 
-// En la ventana destino
-DragTarget<MyData>(
-  onAccept: (data) => procesarDataCompartida(data),
-);
-```
+**Con `desktop_multi_window` (stable):** cada motor tiene su propio Isolate y su propio `ProviderScope`. La sincronización entre ventanas requiere `WindowMethodChannel` + `ref.invalidate()`.
 
-### 7.4 Estado Global Sin Sincronización (Single Isolate)
+**Con Windowing API nativa (experimental, main channel):** único Isolate compartido — Riverpod, Bloc y Streams funcionan natively entre ventanas sin puentes adicionales. Esta es la ventaja principal que llegará cuando la API salga de experimental.
 
-Al ser un único proceso de Dart, cualquier gestor de estado (Riverpod, Bloc, Signals) funciona **out of the box** a través de todas las ventanas:
+### 7.5 Tabla Comparativa: `desktop_multi_window` vs SDK Windowing (experimental)
 
-*   **Consistencia inmediata:** Si un WebSocket recibe datos en la Ventana A, el widget de la Ventana B se actualiza al instante porque escucha el mismo `Stream`.
-*   **Sin latencia:** No hay serialización JSON entre ventanas. Es paso de memoria directo (paso por referencia).
-*   **Hot Reload unificado:** Un solo clic recarga todas las ventanas abiertas simultáneamente.
+> ⚠️ La columna "SDK Nativo" solo aplica al canal `main` con la feature flag `windowing` activada. En stable 3.41, la única opción viable es `desktop_multi_window`.
 
-### 7.5 Tabla Comparativa de Rendimiento: Plugins vs SDK Nativo
-
-| Métrica | Plugins Antiguos | Nativo SDK 3.4x |
+| Métrica | `desktop_multi_window` (stable) | SDK Windowing API (experimental, main) |
 |---|---|---|
-| **Tiempo de apertura** | ~1.5 segundos | ~100 milisegundos |
-| **Uso de CPU (Idle)** | 2-5% por ventana | < 0.5% global |
-| **Comunicación entre ventanas** | Asíncrona (Method Channels) | Sincrónica (Memoria Directa) |
-| **Hot Reload** | Manual por motor | Unificado (Un solo clic) |
+| **Disponibilidad** | ✅ Flutter stable 3.41 | ⚠️ Solo canal `main` + feature flag |
+| **Arquitectura** | Motor separado por ventana | Único Isolate compartido |
+| **Tiempo de apertura** | ~200–500 ms (inicia motor nuevo) | ~50–100 ms (vista nueva en motor existente) |
+| **Estado compartido** | Requiere `WindowMethodChannel` | Automático (mismo Isolate) |
+| **Hot Reload** | Por motor (puede requerir reinicio) | Unificado |
+| **Crash si usa `SystemNavigator.pop()`** | Sí — mata todo el proceso | No aplica |
+| **Producción-ready** | ✅ Sí | ❌ No (breaking changes posibles) |
 
 ### 7.6 APIs de Sistema y Hardware Integradas
 
@@ -250,35 +353,24 @@ El SDK 3.4x incluye soporte nativo para las siguientes integraciones de escritor
 2.  **Atajos de Teclado:** `Shortcuts` y `Actions` que se propagan correctamente según qué ventana tenga el foco activo del sistema operativo.
 3.  **Bandeja del Sistema (System Tray):** ⚠️ **El SDK 3.4x NO expone System Tray en Dart.** Se requiere el plugin `tray_manager` (ver Sección 7.15).
 
-### 7.7 Íconos Independientes por Ventana (Multi-Icon Support)
+### 7.7 Íconos Independientes por Ventana
 
-Al igual que `JFrame.setIconImage()` en Java/Swing, Flutter 3.4x permite asignar un ícono distinto a cada ventana en tiempo de ejecución pasando el `viewId`.
-
-**Contexto histórico crítico:** Antes de SDK 3.4x, el ícono de la aplicación Flutter se definía exclusivamente en tiempo de compilación, dentro de los archivos `.ico` (Windows) o `.icns` (macOS). Cambiar el ícono de una ventana individual en tiempo de ejecución era imposible sin hacks de plataforma. Con el soporte de `viewId`, el control es total y completamente dinámico.
+**En stable 3.41:** Los íconos por ventana individual en runtime no están expuestos en la API pública de Dart. Para control fino de íconos de ventana se requiere el plugin `window_manager` (ver Sección 7.14).
 
 ```dart
-import 'package:flutter/services.dart';
+// Con window_manager (stable):
+import 'package:window_manager/window_manager.dart';
 
-Future<void> setWindowIcon(int viewId, String assetPath) async {
-  await SystemChannels.window.invokeMethod('setWindowIcon', {
-    'id': viewId,
-    'asset': assetPath,
-  });
-}
-
-// Caso de uso: Abrir una ventana de alerta con su propio ícono
-void abrirAlerta() async {
-  final viewId = await PlatformDispatcher.instance.requestView();
-  await setWindowIcon(viewId, 'assets/icons/warning_icon.png');
-}
+await windowManager.setIcon('assets/icons/mi_icono.ico'); // Solo ventana principal
 ```
 
-| Característica | Java (JFrame) | Flutter 3.4x |
+El ícono de la aplicación se define en tiempo de compilación en los archivos nativos (`windows/runner/resources/app_icon.ico`, `macos/Runner/Assets.xcassets/AppIcon.appiconset/`, `linux/runner/`). Cambiar íconos individuales por ventana en runtime con la API pública de stable no es posible actualmente sin FFI nativo.
+
+| Característica | Java (JFrame) | Flutter stable 3.41 |
 |---|---|---|
-| **Método** | `frame.setIconImage()` | `SystemChannels.window` |
-| **Formato** | Image Object | Assets / ByteData |
-| **Independencia por ventana** | Total | Total (via `viewId`) |
-| **Dinámico en runtime** | Sí | Sí |
+| **Ícono global de app** | `frame.setIconImage()` | Definido en assets nativos del runner |
+| **Ícono por ventana en runtime** | Total | Solo via `window_manager` (ventana principal) |
+| **Dinámico en runtime** | Sí | Limitado (solo `window_manager`) |
 
 ### 7.8 Eventos de Puntero Transversales (Cross-Window Pointer Events)
 
@@ -417,11 +509,15 @@ class CustomTitleBar extends StatelessWidget {
                 ),
                 IconButton(
                   icon: const Icon(Icons.close, color: Colors.redAccent),
-                  onPressed: () {
+                  onPressed: () async {
                     if (viewId == 0) {
-                      SystemNavigator.pop();
+                      // Ventana principal: cerrar app
+                      await windowManager.close(); // plugin window_manager
                     } else {
-                      PlatformDispatcher.instance.closeView(viewId);
+                      // Sub-ventana (desktop_multi_window): NO usar SystemNavigator.pop()
+                      // (mata el proceso completo en desktop)
+                      final controller = await WindowController.fromCurrentEngine();
+                      await controller.hide();
                     }
                   },
                 ),
@@ -437,21 +533,148 @@ class CustomTitleBar extends StatelessWidget {
 
 ### 7.13 Core API References (Desktop Multi-Window)
 
-#### `dart:ui` Layer
-*   **`PlatformDispatcher`** — Punto central de control del motor. Métodos clave: `requestView()`, `closeView(int viewId)`, `views` (iterable de todas las vistas abiertas).
-*   **`FlutterView`** — Representa una ventana/superficie nativa individual. Expone `viewId`, `physicalSize`, `devicePixelRatio`, y métricas del display donde reside.
-*   **`Display`** — Representa un monitor físico del sistema. Permite consultar resolución, `devicePixelRatio` y si hay un monitor conectado antes de crear una vista. Útil para posicionar ventanas hijas en el monitor correcto en setups multi-monitor.
+#### Plugin `desktop_multi_window ^0.3.0` (stable 3.41 — producción)
+*   **`WindowController.create(WindowConfiguration)`** — Crea una nueva ventana (motor Flutter separado). Retorna `Future<WindowController>`.
+*   **`WindowController.fromCurrentEngine()`** — Obtiene el controller de la ventana actual (para cerrarla desde adentro).
+*   **`WindowController.getAll()`** — Lista todos los controllers activos.
+*   **`WindowMethodChannel(name, mode: ChannelMode.unidirectional)`** — Canal de mensajes entre motores.
+*   **`WindowConfiguration({arguments: String, hiddenAtLaunch: bool})`** — Configuración al crear una ventana; `arguments` es un JSON String que la ventana hija lee en `main()`.
 
-#### Widget Layer
-*   **`View`** — Widget que representa la raíz de un `FlutterView` en el árbol de widgets. `View.of(context)` obtiene el `FlutterView` más cercano en el contexto.
-*   **`ViewAnchor`** — Widget que permite anclar una vista secundaria (`FlutterView`) a una posición concreta dentro del árbol de widgets de la vista padre. Útil para crear ventanas hijas que se posicionan relativamente al widget que las invoca (ej. tooltips de ventana completa, popups de panel de herramientas anclados a un botón). Es la diferencia entre "abrir una ventana independiente" y "anclar una vista en un punto del layout".
+#### `dart:ui` Layer (disponible en stable)
+*   **`PlatformDispatcher`** — `views` (iterable de `FlutterView` activas), `onMetricsChanged`. ⚠️ `requestView()` y `closeView()` **NO existen** en la API pública de stable 3.41.
+*   **`FlutterView`** — Representa una superficie de renderizado. Expone `viewId`, `physicalSize`, `devicePixelRatio`, y el `Display` donde reside.
+*   **`Display`** — Monitor físico del sistema. Permite leer resolución y `devicePixelRatio` antes de posicionar ventanas.
 
-#### Channel Layer
-*   **`SystemChannels.window`** — Métodos disponibles vía `invokeMethod`: `setWindowTitle`, `setWindowIcon`, `minimize`, `maximize`, `startDragging`, `closeView`.
+#### Widget Layer (disponible en stable)
+*   **`View`** — Raíz de un `FlutterView` en el árbol de widgets. `View.of(context)` obtiene el `FlutterView`.
+*   **`ViewAnchor`** — Ancla una vista secundaria a un punto del layout del widget padre.
+*   **`ViewCollection`** — Agrupa múltiples `View` en una zona no-rendering del árbol.
+
+#### Windowing API (⚠️ experimental — solo canal main)
+*   **`RegularWindowController`** — Ventana estándar top-level redimensionable.
+*   **`DialogWindowController`** — Ventana de diálogo (modal).
+*   **`TooltipWindowController`** — Ventana tooltip flotante.
+*   **`PopupWindowController`** — Menú popup/contextual nativo.
+*   Todas marcadas `@internal`. Requieren `debugEnabledFeatureFlags.add('windowing')`.
 
 #### Official References
 *   [flutter.dev/desktop](https://flutter.dev/desktop)
-*   [Flutter Desktop Multi-Window Design Doc](https://flutter.dev/go/desktop-multi-window-support)
+*   [pub.dev/packages/desktop_multi_window](https://pub.dev/packages/desktop_multi_window)
+*   [GitHub issue #30701 — Flutter native windowing tracking](https://github.com/flutter/flutter/issues/30701)
+
+### 7.13.1 Drag and Drop Inter-Ventana (estado real en stable 3.41)
+
+> **Regla obligatoria para el agente:** No afirmar que `Draggable`/`DragTarget` del SDK funcionan entre ventanas de `desktop_multi_window`. En stable 3.41 **no existe API pública nativa** para drag-and-drop inter-ventana entre motores Flutter.
+
+#### Qué sí y qué no en stable
+
+| Escenario | Estado en Flutter stable 3.41 |
+|---|---|
+| `Draggable<T>` + `DragTarget<T>` dentro de la misma ventana | ✅ Soportado |
+| Drag & drop entre dos ventanas creadas con `desktop_multi_window` (motores distintos) usando solo SDK | ❌ No soportado |
+| Drag & drop nativo OS-level (Explorer/Finder/Files) | ⚠️ Requiere plugin |
+
+#### Plugins recomendados para producción
+
+*   **`super_drag_and_drop`**: solución completa para desktop (iniciar drag + recibir drop con formatos nativos del OS).
+*   **`desktop_drop`**: opción simple cuando solo necesitas recibir archivos arrastrados desde el sistema.
+
+#### Caso común: arrastrar archivos a una ventana (Excel, CSV, PDF)
+
+Sí, este caso está soportado en desktop mediante plugin. Para formularios/importadores donde el usuario arrastra un archivo (por ejemplo `.xlsx` o `.xls`) hacia una ventana Flutter:
+
+*   Usa **`desktop_drop`** si solo necesitas recibir archivos del sistema.
+*   Usa **`super_drag_and_drop`** si además necesitas iniciar drags desde Flutter o manejar formatos avanzados.
+
+Snippet recomendado con `desktop_drop` (importación Excel):
+
+```dart
+import 'package:desktop_drop/desktop_drop.dart';
+
+class ExcelDropZone extends StatefulWidget {
+  const ExcelDropZone({super.key, required this.onExcelFile});
+  final ValueChanged<String> onExcelFile;
+
+  @override
+  State<ExcelDropZone> createState() => _ExcelDropZoneState();
+}
+
+class _ExcelDropZoneState extends State<ExcelDropZone> {
+  bool _highlight = false;
+
+  bool _isExcel(String path) {
+    final p = path.toLowerCase();
+    return p.endsWith('.xlsx') || p.endsWith('.xls');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DropTarget(
+      onDragEntered: (_) => setState(() => _highlight = true),
+      onDragExited: (_) => setState(() => _highlight = false),
+      onDragDone: (details) {
+        setState(() => _highlight = false);
+        for (final file in details.files) {
+          final path = file.path;
+          if (_isExcel(path)) {
+            widget.onExcelFile(path);
+            break;
+          }
+        }
+      },
+      child: Container(
+        height: 140,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          border: Border.all(
+            color: _highlight ? Colors.blue : Colors.grey,
+            width: 2,
+          ),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: const Text('Arrastra aqui un archivo Excel (.xlsx/.xls)'),
+      ),
+    );
+  }
+}
+```
+
+Buenas practicas obligatorias para respuestas del agente:
+
+*   Validar extension (`.xlsx`/`.xls`) y mostrar error si no coincide.
+*   No bloquear UI: parsear Excel en isolate (`compute`/`Isolate.run`) si el archivo es grande.
+*   Limitar tamaño maximo aceptado y manejar errores de lectura/corrupcion.
+*   Para parsing, sugerir paquete especializado (`excel`) despues de validar el path.
+
+#### Patrón recomendado con `desktop_multi_window`
+
+1. En cada ventana, registrar su `DropRegion` (target) o `DraggableWidget` (source) con plugin nativo.
+2. Serializar payload (por ejemplo JSON o file URIs) en formatos del OS (`plainText`, `fileUri`, etc.).
+3. Al completar el drop, hidratar el modelo y sincronizar estado local; para refrescar otras ventanas, usar `WindowMethodChannel`.
+
+#### Snippet guía (conceptual)
+
+```dart
+// Source window (engine A): inicia drag nativo
+final item = DragItem();
+item.add(Formats.plainText(jsonEncode(record.toJson())));
+
+// Target window (engine B): recibe drop nativo
+onPerformDrop: (event) async {
+  final data = await event.session.items.first.dataReader!
+      .readValue(Formats.plainText);
+  if (data != null) {
+    final record = Record.fromJson(jsonDecode(data));
+    ref.read(recordsProvider.notifier).add(record);
+  }
+}
+```
+
+#### Anti-patrones (prohibidos en respuestas)
+
+*   Decir que `DragTarget` cruza ventanas por compartir isolate en stable.
+*   Inventar APIs del SDK como `PlatformDispatcher.startNativeDrag()` o equivalentes.
+*   Marcar `super_drag_and_drop` o `desktop_drop` como obsoletos en stable 3.41.
 
 ---
 
@@ -971,21 +1194,53 @@ void onTrayIconMouseDown() async {
 
 ---
 
-## 7.16 Plugin `desktop_multi_window` — ⛔ OBSOLETO en SDK 3.4x
+## 7.16 Plugin `desktop_multi_window` — ✅ REQUERIDO en Stable 3.41
 
-> **No usar en proyectos nuevos.** `desktop_multi_window` crea motores Flutter **separados** por ventana, lo que implica estado no compartido, comunicación por IPC serializado y mayor consumo de recursos.
+> **Estado real (stable 3.41):** `desktop_multi_window: ^0.3.0` es la solución **recomendada y funcional** para multi-ventana en Flutter desktop stable. La alternativa nativa del SDK existe pero está marcada `@internal` y solo se puede usar en el canal `main` con feature flag experimental.
 >
-> **Reemplazado por:** `PlatformDispatcher.instance.requestView()` del SDK 3.4x nativo, que usa un único Isolate compartido para todas las ventanas (ver Sección 7.1–7.3).
+> **Futuro (cuando salga de experimental):** `RegularWindowController` y sus hermanos del SDK nativo reemplazarán al plugin. Se podrá migrar cuando la Windowing API llegue a stable sin breaking changes.
 
-Guía de migración para código legado:
+### Guía de uso correcto (stable 3.41)
 
-| `desktop_multi_window` (obsoleto) | SDK 3.4x Nativo |
+| Operación | `desktop_multi_window` (estable) |
 |---|---|
-| `DesktopMultiWindow.createWindow(args)` | `PlatformDispatcher.instance.requestView()` |
-| `WindowController.fromWindowId(id)` | `View.of(context)` en la vista destino |
-| IPC JSON entre ventanas | Paso de memoria directa (mismo Isolate) |
-| `controller.invokeMethod('refresh')` | `ref.invalidate(provider)` / `stream.add(event)` |
-| `WindowController.fromCurrentEngine().hide()` | `PlatformDispatcher.instance.closeView(viewId)` |
+| Abrir ventana | `WindowController.create(WindowConfiguration(...))` |
+| Cerrar sub-ventana (desde adentro) | `(await WindowController.fromCurrentEngine()).hide()` |
+| **⚠️ NUNCA usar para cerrar** | `SystemNavigator.pop()` — mata el proceso completo en desktop |
+| Listar ventanas activas | `WindowController.getAll()` |
+| Comunicar entre ventanas | `WindowMethodChannel('canal', mode: ChannelMode.unidirectional)` |
+| Pasar datos al lanzar | `WindowConfiguration(arguments: jsonEncode({...}))` |
+| Leer args en la sub-ventana | `WindowController.fromCurrentEngine().arguments` |
+
+### Registro nativo requerido (por plataforma)
+
+Cada ventana nueva crea un motor Flutter independiente. Los plugins deben registrarse también en el nuevo motor mediante un callback nativo:
+
+**Linux** (`linux/runner/my_application.cc`):
+```cpp
+#include "desktop_multi_window/desktop_multi_window_plugin.h"
+desktop_multi_window_plugin_set_window_created_callback(
+    [](FlPluginRegistry* registry) {
+      fl_register_plugins(registry);
+    });
+```
+
+**Windows** (`windows/runner/flutter_window.cpp`):
+```cpp
+#include "desktop_multi_window/desktop_multi_window_plugin.h"
+DesktopMultiWindowSetWindowCreatedCallback([](void* controller) {
+  auto* fvc = reinterpret_cast<flutter::FlutterViewController*>(controller);
+  RegisterPlugins(fvc->engine());
+});
+```
+
+**macOS** (`macos/Runner/MainFlutterWindow.swift`):
+```swift
+import desktop_multi_window
+FlutterMultiWindowPlugin.setOnWindowCreatedCallback { controller in
+  RegisterGeneratedPlugins(registry: controller)
+}
+```
 
 ---
 
@@ -1374,4 +1629,4 @@ pdf.addPage(pw.Page(
 
 ---
 
-**Final Directive:** If the code you generate misses opportunities to use `CarouselView.builder`, `popUntilWithResult`, `CupertinoSheet` drag handles, `RepeatingAnimationBuilder`, uses `SizedBox` for spacing, or prefixes an Enum unnecessarily, you have failed the 3.41 standard. For desktop apps, failing to use `PlatformDispatcher` for multi-window, using old community window plugins, assuming a single `devicePixelRatio` for multi-monitor setups, omitting `sqfliteFfiInit()` in desktop database apps, using `desktop_multi_window` instead of `PlatformDispatcher`, placing shortcuts only in `MenuItemButton.shortcut` without `CallbackShortcuts`, or skipping `resolveTrayIconPath()` for Windows tray icons also constitutes a failure of the 3.41 standard. Write perfect modern Dart natively tailored to the platform.
+**Final Directive:** If the code you generate misses opportunities to use `CarouselView.builder`, `popUntilWithResult`, `CupertinoSheet` drag handles, `RepeatingAnimationBuilder`, uses `SizedBox` for spacing, or prefixes an Enum unnecessarily, you have failed the 3.41 standard. For desktop apps on **Flutter stable 3.41**: generating code that calls `PlatformDispatcher.instance.requestView()` or `PlatformDispatcher.instance.closeView()` (these methods do not exist in the public stable API), using `SystemNavigator.pop()` to close a sub-window (it kills the entire process), omitting the native plugin registration callback for multi-window engines, assuming that multi-window uses a single Isolate in stable (it does not — each window is a separate engine requiring `WindowMethodChannel` for sync), assuming a single `devicePixelRatio` for multi-monitor setups, omitting `sqfliteFfiInit()` in desktop database apps, placing shortcuts only in `MenuItemButton.shortcut` without `CallbackShortcuts`, or skipping `resolveTrayIconPath()` for Windows tray icons also constitutes a failure of the 3.41 standard. For multi-window in stable, use `desktop_multi_window: ^0.3.0`. The native Windowing API (`RegularWindowController`, etc.) is experimental and only available on the `main` channel. Write perfect modern Dart natively tailored to the platform.
