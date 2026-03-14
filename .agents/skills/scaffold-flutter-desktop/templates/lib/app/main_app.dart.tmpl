@@ -1,0 +1,44 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:{{PROJECT_NAME}}/app/main_window_refresh_notifier.dart';
+import 'package:{{PROJECT_NAME}}/app/window/main_window.dart';
+import 'package:{{PROJECT_NAME}}/features/theme/theme_provider.dart';
+
+/// Global navigator key so tray callbacks can open dialogs.
+final mainNavigatorKey = GlobalKey<NavigatorState>();
+
+class MainApp extends ConsumerWidget {
+  const MainApp({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final settings = ref.watch(themeProvider);
+
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      navigatorKey: mainNavigatorKey,
+      title: '{{APP_NAME}}',
+      themeMode: settings.mode,
+      theme: ThemeData(
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: settings.color,
+          brightness: Brightness.light,
+        ),
+        useMaterial3: true,
+      ),
+      darkTheme: ThemeData(
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: settings.color,
+          brightness: Brightness.dark,
+        ),
+        useMaterial3: true,
+      ),
+      home: const MainWindow(),
+    );
+  }
+}
+
+/// Called from tray menu to trigger a global refresh in MainWindow.
+void requestMainWindowRefresh() {
+  MainWindowRefreshNotifier.instance.requestRefresh();
+}

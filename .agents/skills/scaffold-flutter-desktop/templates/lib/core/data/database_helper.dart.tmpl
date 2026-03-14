@@ -1,0 +1,85 @@
+import 'dart:io';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'package:path/path.dart';
+import 'package:path_provider/path_provider.dart';
+
+/// Desktop SQLite helper using sqflite_common_ffi.
+///
+/// Usage:
+///   final rows = await DatabaseHelper.instance.getAll();
+///   await DatabaseHelper.instance.insert({'name': 'Alice'});
+class DatabaseHelper {
+  static final DatabaseHelper instance = DatabaseHelper._init();
+  static Database? _database;
+
+  DatabaseHelper._init();
+
+  Future<Database> get database async {
+    if (_database != null) return _database!;
+    _database = await _initDB('{{PROJECT_NAME}}.db');
+    return _database!;
+  }
+
+  Future<Database> _initDB(String filePath) async {
+    if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+      // Required on desktop: initialize FFI before any database operation.
+      sqfliteFfiInit();
+      databaseFactory = databaseFactoryFfi;
+    }
+    final dbDir = await getApplicationDocumentsDirectory();
+    final path = join(dbDir.path, filePath);
+    return await databaseFactory.openDatabase(
+      path,
+      options: OpenDatabaseOptions(version: 1, onCreate: _createDB),
+    );
+  }
+
+  Future<void> _createDB(Database db, int version) async {
+    // TODO: Define your schema. Add more tables or columns as needed.
+    await db.execute('''
+CREATE TABLE {{TABLE_NAME}} (
+  id      INTEGER PRIMARY KEY AUTOINCREMENT,
+  name    TEXT    NOT NULL,
+  created TEXT    NOT NULL DEFAULT (datetime('now'))
+)
+''');
+  }
+
+  // ── CRUD helpers ──────────────────────────────────────────────────────────
+
+  Future<int> insert(Map<String, dynamic> row) async {
+    final db = await instance.database;
+    return await db.insert('{{TABLE_NAME}}', row);
+  }
+
+  Future<List<Map<String, dynamic>>> getAll() async {
+    final db = await instance.database;
+    return await db.query('{{TABLE_NAME}}', orderBy: 'id ASC');
+  }
+
+  Future<Map<String, dynamic>?> getById(int id) async {
+    final db = await instance.database;
+    final rows = await db.query(
+      '{{TABLE_NAME}}',
+      where: 'id = ?',
+      whereArgs: [id],
+      limit: 1,
+    );
+    return rows.isEmpty ? null : rows.first;
+  }
+
+  Future<int> update(Map<String, dynamic> row) async {
+    final db = await instance.database;
+    return await db.update(
+      '{{TABLE_NAME}}',
+      row,
+      where: 'id = ?',
+      whereArgs: [row['id']],
+    );
+  }
+
+  Future<int> delete(int id) async {
+    final db = await instance.database;
+    return await db.delete('{{TABLE_NAME}}', where: 'id = ?', whereArgs: [id]);
+  }
+}

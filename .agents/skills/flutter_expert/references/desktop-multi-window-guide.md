@@ -1,203 +1,18 @@
----
-name: flutter_expert
-description: The definitive Flutter & Dart technical guide. Enforces strict compliance with Flutter 3.41, Impeller optimizations, exhaustive Cupertino parity, iOS/Android platform interop paradigms, WebAssembly targets, and modern Dart 3.10+ syntax. Features exhaustive knowledge from versions 3.27 through 3.41.
-license: Apache-2.0
----
-
-# 🚀 Flutter Master Engineer Guidelines (v3.41 Standard)
-
-You are an elite, senior-level Flutter and Dart engineer. Your primary mandate is to generate, architect, review, and refactor code strictly according to **Flutter 3.41** and **Dart 3.x** standards.
-
-You must abandon outdated practices, aggressively adopt highly optimized modern syntax, and design software taking full advantage of the underlying engine improvements (Impeller) and the absolute latest framework widgets introduced from version 3.27 up to 3.41.
-
-## When to Use This Skill
-
-Use this skill when the user asks for any of the following:
-
-* Flutter architecture, refactors, or code generation constrained to Flutter 3.27-3.41.
-* Desktop multi-window behavior (stable vs experimental), native menu bars, tray, and window lifecycle.
-* Cross-platform widget selection (mobile, desktop, web) with up-to-date APIs.
-* Migration away from deprecated Flutter/Dart patterns to modern equivalents.
-* Performance-sensitive UI decisions related to Impeller and platform rendering behavior.
-
-## Prerequisites
-
-Before applying recommendations from this skill:
-
-* Confirm Flutter channel/version and target platform (Windows/macOS/Linux/iOS/Android/Web).
-* For desktop multi-window in stable, use `desktop_multi_window: ^0.3.0`.
-* Treat native SDK windowing APIs as experimental unless the project explicitly uses channel `main` and feature flag `windowing`.
-* Validate third-party plugin availability and platform support in `pubspec.yaml`.
-
-## Step-by-Step Workflows
-
-1. Identify platform and runtime constraints (stable vs main channel, desktop vs mobile vs web).
-2. Consult the appropriate platform catalog in `templates/`.
-3. Select modern APIs first; avoid deprecated or legacy patterns.
-4. Apply platform-safe implementation details (especially desktop window lifecycle and file-drop behavior).
-5. Verify behavior with production-safe fallbacks when APIs are experimental.
-
-## Troubleshooting
-
-| Problem | Cause | Action |
-|---|---|---|
-| Multi-window code compiles in docs but fails in stable | API is `@internal`/experimental | Switch to `desktop_multi_window` for stable builds |
-| Drag and drop works in one window but not cross-window | Using SDK `Draggable`/`DragTarget` across engines | Use `desktop_drop` or `super_drag_and_drop` |
-| Window close exits full app | `SystemNavigator.pop()` used in desktop sub-window | Use `WindowController.fromCurrentEngine().hide()` |
-| Desktop window controls missing advanced behavior | SDK lacks full Dart exposure | Use `window_manager` where needed |
-
-## References
-
-* [desktop widgets catalog](templates/desktop_widgets.md)
-* [desktop project patterns](templates/desktop_project_patterns.md)
-* [mobile widgets catalog](templates/mobile_widgets.md)
-* [web widgets catalog](templates/web_widgets.md)
-
----
-
-## 1. The Definitive New Widget & API Catalog (3.27 - 3.41)
-
-When solving problems or writing new UI components, you **must** use these specific new widgets and properties to avoid building custom boilerplate for things the framework now handles natively.
-
-### 🔴 High-Impact Structural Widgets
-*   **`CarouselView` & `CarouselView.builder` (3.35 / 3.41):** Never use `PageView` or custom horizontal list hacks for carousels. Use `CarouselView`, and specifically use the `.builder` constructor for large or infinite data sets to optimize memory.
-*   **`SliverFloatingHeader` & `PinnedHeaderSliver` (3.27):** Use these native slivers for iOS-style settings headers or dynamic scrolling headers instead of complex `SliverPersistentHeader` delegate boilerplate.
-*   **`RepeatingAnimationBuilder` (3.41):** Do NOT write custom `StatefulWidgets` with explicit `AnimationController` loops just for simple repetitive animations. Use this widget to eliminate boilerplate entirely.
-*   **`SensitiveContent` (3.35):** When rendering passwords, OTPs, or financial data on Android API 34+, you MUST wrap the widget tree in `SensitiveContent` to obscure it from screen casting/recording.
-*   **`SliverEnsureSemantics` (3.35):** Always use this when dealing with complex custom sliver behaviors to guarantee screen readers can index off-screen items correctly.
-
-### 🔵 UI Components & UX Enhancements
-*   **`Badge.count` `maxCount` Parameter (3.38):** When using `Badge.count`, cleanly bound your notification numbers (e.g., "99+") natively via the `maxCount` property instead of writing custom integer formatting logic.
-*   **Customizable Tooltips (3.41):** Position `Tooltip`s manually via the newly exposed API when default placement clips or obscures important UI context.
-*   **Saturation `ColorFilter.matrix` (3.41):** Leverage the new built-in saturation filters instead of complex custom shaders or heavy external packages for simple image tone adjustments.
-*   **`ListTileControlAffinity` inside `ListTileTheme` (3.27):** Set global alignment for leading/trailing interactive elements directly in the theme rather than overriding it per `ListTile`.
-*   **`WebParagraph` enhancements (3.41):** On the web, leverage full support for text placeholders and deep text decorations that didn't previously exist in the WASM target.
-
-### 🟢 Core Routing & API Methods
-*   **`Navigator.popUntilWithResult` (3.41):** You MUST use this new API when needing to pop multiple screens and return a value to the destination route. Never use complex state-management hacks or nested `pop` chains to achieve this anymore.
-*   **`OptionsViewOpenDirection.mostSpace` (3.41):** When implementing `RawAutocomplete`, always configure it with the `mostSpace` open direction so dropdowns automatically handle screen boundary collisions.
-*   **Desktop Native Multi-Window (3.41 — ⚠️ EXPERIMENTAL, canal main únicamente):** Flutter 3.41 introdujo clases nativas (`RegularWindowController`, `DialogWindowController`, `TooltipWindowController`, `PopupWindowController`) para multi-ventana en Windows, macOS y Linux. **Sin embargo, en Flutter stable 3.41 estas APIs están marcadas como `@internal` y requieren añadir la feature flag `windowing` y usar el canal `main`.** En producción sobre Flutter stable, sigue siendo necesario usar el plugin `desktop_multi_window: ^0.3.0`. Nunca generes código que llame a `PlatformDispatcher.instance.requestView()` — ese método no existe en la API pública estable.
-*   **Widget Previews (`@Preview()`) (3.38 / 3.41):** Implement `@Preview()` annotations on all standalone UI components so they render in the IDE's Widget Previewer. Make sure to define `MultiPreviews` where applicable.
-*   **`OverlayPortal` (3.38):** Rely heavily on `OverlayPortal` for tooltips or custom dropdowns. The `OverlayPortal.targetsRootOverlay` constructor has been deprecated; use explicit `OverlayPortalController` logic.
-
----
-
-## 2. The Definitive Apple & Cupertino Parity Catalog
-
-When building for iOS/macOS, you **must** use the specific Cupertino libraries to guarantee pixel-perfect native fidelity. Do not fallback to Material approximations for iOS builds.
-
-### 🍎 Cupertino Structural Components
-*   **`CupertinoSheet` (iOS 18 Native Feel):** Always explicitly set `showDragHandle: true` and rely on its newly integrated native stretching physics (Flutter 3.41). Never build custom draggable bottom sheets on iOS.
-*   **Transparent Cupertino Navigation Bars (3.27):** Utilize the native transparency support for modern iOS blur-behind effects on primary routing (`CupertinoNavigationBar` & `CupertinoSliverNavigationBar` will remain fully transparent until content scrolls beneath them).
-*   **Momentary `CupertinoSlidingSegmentedControl` (3.38):** Leverage the new "momentary" variant when you need segmented buttons that act as discrete triggers rather than persistent state switches.
-*   **Continuous-Corner Aesthetics (3.35):** Recognize that all modern Cupertino widgets now dynamically use the `RSuperellipse` shape under the hood to completely match Apple's squircle drawing API. Do not override shape themes manually if possible.
-*   **Cupertino Buttons (3.27):** Automatically leverage the new `CupertinoButtonSize` enum (small, medium, large) and the `CupertinoButton.tinted` constructor for translucent backgrounds.
-
-### 🍎 iOS Tooling & Integrations (Mandatory 3.41 Standards)
-*   **Swift Package Manager (SPM):** CocoaPods is legacy. Flutter 3.41 has full SPM support. Ensure any iOS plugins or scripts generated prefer SPM integration.
-*   **UIScene Lifecycle (3.41):** Apple is moving aggressively to `UIScene`. Design your app's native iOS runner code (if generating Swift) to support the Scene Delegate lifecycle handling by default, not the old App Delegate alone.
-*   **Bounded Blurs (Impeller 3.41):** When writing iOS blurring effects (`BackdropFilter`), rely on the Impeller "bounded blur" style which physically eliminates the old edge-bleeding artifacts.
-*   **Dynamic Content Resizing (3.41):** For Add-to-App, let Flutter views auto-resize based on content natively on iOS.
-
----
-
-## 3. Core Architectural & Engine Directives
-
-### 3.1 The Impeller Era (3.41)
-*   **Assumption:** Impeller is the active, default rendering engine. 
-*   **Actionable Rule:** Fragment shaders in 3.41 now support synchronous image decoding (`decodeImageFromPixelsSync`) and 128-bit float high-bitrate textures. Push for GPU-driven effects instead of CPU-bound animations where applicable.
-
-### 3.2 Unified Mobile Threading (3.29+)
-*   **Assumption:** Dart code executes synchronously directly on the application's main thread, eliminating the legacy separate UI thread.
-*   **Actionable Rule:** Platform channel communication is drastically faster. Prefer synchronous interaction designs over heavy asynchronous message passing when designing platform interop.
-
-### 3.3 Web Target is WebAssembly (3.41)
-*   **Assumption:** HTML renderer is dead. All web runs on CanvasKit/WASM. 
-*   **Actionable Rule (3.41):** Static images are offloaded to native `<img>` elements to save WASM decoder memory. Avoid deprecated `dart:js` and use `dart:js_interop`.
-
----
-
-## 4. Mandatory Dart 3.10+ & Syntax Rules
-
-You must actively use the following features when generating code. Legacy patterns must be refactored.
-
-### 4.1 The `spacing` Code Smell (3.27+)
-**NEVER use `SizedBox` for static spacing between children in a `Row` or `Column`.**
-
-**🔴 Legacy (Avoid):**
-```dart
-Column(
-  children: [ Text('A'), const SizedBox(height: 16), Text('B') ],
-)
-```
-
-**🟢 Modern (Enforce):**
-```dart
-Column(
-  spacing: 16.0,
-  children: [ Text('A'), Text('B') ],
-)
-```
-
-### 4.2 Dot Shorthand Enums (3.38+)
-When the framework expects an enum derived from the parameter type, drop the prefix.
-
-**🔴 Legacy (Avoid):**
-```dart
-Column(
-  mainAxisAlignment: MainAxisAlignment.center, // WRONG
-)
-```
-
-**🟢 Modern (Enforce):**
-```dart
-Column(
-  mainAxisAlignment: .center, // CORRECT
-)
-```
-
-### 4.3 Strict Records and Pattern Matching
-*   **Do not** create disposable "Result" classes for returning multiple values. ALWAYS use Dart Records.
-*   **Do not** use deeply nested `if/else` checks. Use pattern matching and exhaustive `switch` expressions.
-
----
-
-## 5. Breaking Changes & Deprecations to Fix
-
-### 5.1 `CupertinoDynamicColor` Deprecations (3.38)
-The properties `red`/`green`/`blue` and `.withOpacity` methods are deprecated. Use generic float-based `Color` space manipulations (`.withValues(alpha: 0.5)`) and acknowledge the framework’s transition to P3 wide-gamut colors natively on iOS displays.
-
-### 5.2 `SnackBar` Auto-Dismissal (3.38)
-If a `SnackBar` contains an action, it will **no longer automatically dismiss**. Fix UX by explicitly setting a tight `duration` or attaching dismissal logic to the callback.
-
-### 5.3 iOS/macOS Asset Bundling
-*   Use platform-specific asset bundling in `pubspec.yaml` to prevent desktop assets from shipping to iOS/Android targets, saving critical application size.
-
----
-
-## 6. Per-Platform Exhaustive Widget Catalogs
-
-The `templates/` directory contains exhaustive, version-by-version documentation of **every** new widget, updated widget, new property, API change, engine change, and breaking change introduced from Flutter 3.27 to 3.41, organized by target platform:
-
-*   **[mobile_widgets.md](templates/mobile_widgets.md)** — iOS (Cupertino) and Android (Material) widgets: `CupertinoSheet`, `CupertinoButton.tinted`, `CupertinoSlidingSegmentedControl` momentary mode, `CupertinoExpansionTile`, `CarouselView.builder`, `RepeatingAnimationBuilder`, `SensitiveContent`, Impeller changes, SPM migration, UIScene lifecycle, wide-gamut P3 colors, and all breaking changes.
-*   **[desktop_widgets.md](templates/desktop_widgets.md)** — Windows, macOS, and Linux widgets: Multi-window support (regular, dialog, popup, tooltip windows), UI/platform thread merge for smooth resizing, `RawMenuAnchor`, `NavigationRail` scrollable, `NavigationDrawer` headers/footers, `Expansible`/`ExpansibleController`, and SPM on macOS.
-*   **[desktop_project_patterns.md](templates/desktop_project_patterns.md)** — Patrones de boilerplate extraídos de un proyecto real de escritorio Flutter: gestión de temas con `flutter_riverpod` + `shared_preferences`, `window_manager` + `tray_manager` (resolución de ícono Windows, workaround Wayland, eventos de clic por plataforma), `local_notifier`, `sqflite_common_ffi` + `path_provider`, generación de PDF con `pdf` + `printing`, cliente IMAP con `enough_mail`, y `MenuBar` nativo con `CallbackShortcuts`.
-*   **[web_widgets.md](templates/web_widgets.md)** — Web (CanvasKit/WASM) rendering and widgets: HTML renderer removal, WASM dry-run validation, `WebParagraph` enhancements, native `<img>` offloading, stateful web hot reload, `dart:js_interop` migration, `OverlayPortal` improvements, and platform-specific asset bundling.
-
-**You MUST consult these catalogs** when building for a specific platform to ensure you are using the exact latest API and not legacy patterns.
-
----
-
 ## 7. Desktop Multi-Window & Native Platform APIs (SDK 3.4x — Guía Maestra)
 
 Esta sección contiene la referencia técnica exhaustiva para el desarrollo de aplicaciones de escritorio de alto rendimiento en Flutter, cubriendo la arquitectura Multi-View nativa, APIs de integración con el sistema operativo y personalización avanzada de ventanas.
+
+> **⚠️ EVALÚA ANTES DE USAR `desktop_multi_window`:**
+> Para la mayoría de apps (alternar entre secciones, formularios, diálogos), un `enum ViewState` + `IndexedStack` en una **sola ventana** es suficiente y no requiere ningún plugin. **El plugin `desktop_multi_window` fue eliminado de este proyecto** por esa razón.
+>
+> Usa `desktop_multi_window: ^0.3.0` únicamente si genuinamente necesitas **ventanas OS simultáneas e independientes** (editor multi-documento, panel flotante separado, ventana de detalles secundaria). Si solo cambias vistas dentro de la misma ventana — no lo uses.
 
 > **⚠️ ESTADO EN FLUTTER 3.41 STABLE (CRÍTICO — LEER ANTES DE GENERAR CÓDIGO):**
 > La API de windowing nativa (`RegularWindowController`, `DialogWindowController`, etc.) existe en el código fuente de Flutter 3.41 en `lib/src/widgets/_window.dart`, pero **todas las clases están marcadas `@internal`** y protegidas por un feature flag experimental. Para usarlas se requiere:
 > 1. Cambiar al canal `main` (`flutter channel main`)
 > 2. Activar el flag: `debugEnabledFeatureFlags.add('windowing')`
 >
-> **En Flutter stable 3.41, la multi-ventana production-ready sigue requiriendo el plugin `desktop_multi_window: ^0.3.0`.** No generes código con `PlatformDispatcher.instance.requestView()` ni `PlatformDispatcher.instance.closeView()` para stable — esas funciones no existen en la API pública.
+> **Si decides usar multi-window en stable 3.41, el plugin `desktop_multi_window: ^0.3.0` es la opción viable.** No generes código con `PlatformDispatcher.instance.requestView()` ni `PlatformDispatcher.instance.closeView()` para stable — esas funciones no existen en la API pública.
 
 ### 7.1 Estado de la Windowing API por Canal
 
@@ -1123,6 +938,8 @@ class _AppState extends State<MyApp> with TrayListener, WindowListener {
 
 ### Known Issues
 
+- **Transparencia en Linux:** Un ícono de tray (.png) que es completamente transparente o de 1x1 pixel no solo será invisible, sino **inclickable**, impidiendo que aparezca el menú.
+- **Closures en menú (Linux):** NUNCA uses la propiedad `onClick: () {}` dentro de un `MenuItem` si apuntas a Linux/AppIndicator; la propagación C++ a Dart falla al usar cierres anónimos (bindings perdidos). Emplea SIEMPRE el método sobrescrito `onTrayMenuItemClick(MenuItem)` de la clase `TrayListener`.
 - **`app_links` conflict:** Si usas `app_links`, debe ser `>= 6.3.3`. Versiones anteriores bloquean la propagación de eventos e impiden que se disparen los clicks del menú de bandeja.
 - **GNOME (Linux):** El ícono puede no mostrarse sin la extensión [AppIndicator](https://extensions.gnome.org/extension/615/appindicator-support/).
 
@@ -1153,24 +970,22 @@ String resolveTrayIconPath() {
 await trayManager.setIcon(resolveTrayIconPath());
 ```
 
-### Patrón Real: Diferencias de Eventos de Clic Derecho por Plataforma
+### Patrón Real: Diferencias de Eventos de Menú por Plataforma
 
-Cada SO dispara el menú contextual en un evento diferente. Ignorar esto provoca que el menú no aparezca en alguna plataforma:
+En las versiones modernas, AppIndicator (Linux) y macOS procesan el menú contextual nativo. Llamar a rutinas adicionales manualmente causará conflictos.
 
 ```dart
-/// WINDOWS: menú en onTrayIconRightMouseDown (al presionar)
-@override
-void onTrayIconRightMouseDown() {
-  if (Platform.isWindows) trayManager.popUpContextMenu();
-}
+  /// Windows puede requerir que forcemos el menú
+  @override
+  void onTrayIconRightMouseDown() {
+    if (Platform.isWindows || Platform.isMacOS) {
+      trayManager.popUpContextMenu();
+    }
+  }
 
-/// LINUX: menú en onTrayIconRightMouseUp (al soltar)
-@override
-void onTrayIconRightMouseUp() {
-  if (Platform.isLinux) trayManager.popUpContextMenu();
-}
-
-/// macOS: el SO muestra el menú automáticamente — NO invocar popUpContextMenu()
+  /// LINUX: NUNCA usar popUpContextMenu, el sistema lo despliega automáticamente de forma nativa.
+  @override
+  void onTrayIconRightMouseUp() {}
 ```
 
 ### Patrón Real: Restaurar Ventana desde Bandeja (Workaround Wayland)
@@ -1194,9 +1009,11 @@ void onTrayIconMouseDown() async {
 
 ---
 
-## 7.16 Plugin `desktop_multi_window` — ✅ REQUERIDO en Stable 3.41
+## 7.16 Plugin `desktop_multi_window` — Referencia para Ventanas OS Independientes
 
-> **Estado real (stable 3.41):** `desktop_multi_window: ^0.3.0` es la solución **recomendada y funcional** para multi-ventana en Flutter desktop stable. La alternativa nativa del SDK existe pero está marcada `@internal` y solo se puede usar en el canal `main` con feature flag experimental.
+> **⚠️ Primero evalúa si lo necesitas.** Para alternar vistas/secciones dentro de la app, usa `enum ViewState` + `IndexedStack`. `desktop_multi_window` crea un motor Flutter separado por ventana — solo tiene sentido cuando necesitas **ventanas OS genuinamente independientes y simultáneas**.
+>
+> **Estado real (stable 3.41):** Si decides usar multi-window, `desktop_multi_window: ^0.3.0` es la opción funcional para stable. La alternativa nativa del SDK existe pero está marcada `@internal` y solo se puede usar en el canal `main` con feature flag experimental.
 >
 > **Futuro (cuando salga de experimental):** `RegularWindowController` y sus hermanos del SDK nativo reemplazarán al plugin. Se podrá migrar cuando la Windowing API llegue a stable sin breaking changes.
 
@@ -1211,6 +1028,29 @@ void onTrayIconMouseDown() async {
 | Comunicar entre ventanas | `WindowMethodChannel('canal', mode: ChannelMode.unidirectional)` |
 | Pasar datos al lanzar | `WindowConfiguration(arguments: jsonEncode({...}))` |
 | Leer args en la sub-ventana | `WindowController.fromCurrentEngine().arguments` |
+
+### Manejo del botón de cierre nativo ("X") en Sub-ventanas (Prevención de Crash)
+
+Al abrir ventanas secundarias con `desktop_multi_window` y usar `window_manager` simultáneamente, existe un problema crítico (ej. bug `#40033` en Flutter Linux). Si el usuario cierra la sub-ventana pulsando el botón nativo ("X") del SO, el sistema operativo enviará una señal de destrucción global (`delete-event`) y matará toda la aplicación principal.
+
+Para solucionarlo de forma segura, DEBES:
+1. Validar que la sub-ventana tenga acceso a sus plugins mediante el registro nativo en C++/Swift (ver *Registro nativo requerido* un poco más abajo).
+2. Interceptar físicamente la acción "X" desde el contexto de la nueva ventana en Dart.
+   ```dart
+   // Al inicializar la UI de la ventana secundaria:
+   await windowManager.ensureInitialized();
+   await windowManager.setPreventClose(true); // Obligatorio: previene que SO mate el thread
+   ```
+3. Utilizar un `WindowListener` (`window_manager`) para reaccionar a la intención de cierre, y simplemente invocar el método `hide()` del plugin `multi_window`:
+   ```dart
+   @override
+   void onWindowClose() async {
+     try {
+       final controller = await WindowController.fromCurrentEngine();
+       await controller.hide(); // Destruye visualmente el wrapper aislado
+     } catch (_) {}
+   }
+   ```
 
 ### Registro nativo requerido (por plataforma)
 
@@ -1629,4 +1469,319 @@ pdf.addPage(pw.Page(
 
 ---
 
-**Final Directive:** If the code you generate misses opportunities to use `CarouselView.builder`, `popUntilWithResult`, `CupertinoSheet` drag handles, `RepeatingAnimationBuilder`, uses `SizedBox` for spacing, or prefixes an Enum unnecessarily, you have failed the 3.41 standard. For desktop apps on **Flutter stable 3.41**: generating code that calls `PlatformDispatcher.instance.requestView()` or `PlatformDispatcher.instance.closeView()` (these methods do not exist in the public stable API), using `SystemNavigator.pop()` to close a sub-window (it kills the entire process), omitting the native plugin registration callback for multi-window engines, assuming that multi-window uses a single Isolate in stable (it does not — each window is a separate engine requiring `WindowMethodChannel` for sync), assuming a single `devicePixelRatio` for multi-monitor setups, omitting `sqfliteFfiInit()` in desktop database apps, placing shortcuts only in `MenuItemButton.shortcut` without `CallbackShortcuts`, or skipping `resolveTrayIconPath()` for Windows tray icons also constitutes a failure of the 3.41 standard. For multi-window in stable, use `desktop_multi_window: ^0.3.0`. The native Windowing API (`RegularWindowController`, etc.) is experimental and only available on the `main` channel. Write perfect modern Dart natively tailored to the platform.
+## 7.22 WebView en Linux — Plugins Incompatibles (Flutter stable 3.41)
+
+> **⚠️ CONCLUSIÓN DEFINITIVA (verificado en proyecto real, marzo 2026):** **No existe ningún plugin de webview funcional para Flutter Linux desktop en stable 3.41.** Todos los plugins evaluados fallan en runtime. La alternativa es `url_launcher` para delegar al navegador del sistema.
+
+| Plugin | Versión | Error en runtime | Veredicto |
+|---|---|---|---|
+| `webview_flutter` | `^4.13.1` | `WebViewPlatform.instance != null` — sin impl. Linux | ❌ No usar |
+| `flutter_inappwebview` | `^6.1.5` | `InAppWebViewPlatform.instance != null` — backend GTK no se registra | ❌ No usar |
+| `desktop_webview_window` | `^0.2.3` | Segfault al cerrar + cierra toda la app | ❌ No usar |
+
+### Alternativa: `url_launcher`
+
+```dart
+import 'package:url_launcher/url_launcher.dart';
+
+Future<void> abrirEnNavegador(String url) async {
+  final uri = Uri.parse(url);
+  if (await canLaunchUrl(uri)) {
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
+}
+```
+
+`url_launcher` funciona en todas las plataformas (Linux, macOS, Windows, iOS, Android) y abre la URL en el navegador predeterminado del sistema operativo.
+
+---
+
+## 7.23 Patrones Avanzados de Impresión: Lista de Impresoras + `directPrintPdf`
+
+La sección 7.21 cubre `Printing.layoutPdf()` (diálogo nativo del SO). Para UX donde el usuario selecciona la impresora **dentro de la app Flutter** y envía sin diálogo del SO, usa `Printing.listPrinters()` + `Printing.directPrintPdf()`.
+
+### Diálogo de selección de impresora (patrón de producción)
+
+```dart
+import 'package:printing/printing.dart';
+import 'print_service.dart'; // tu generatePdf()
+
+class PrintDialog extends StatefulWidget {
+  final List<Map<String, dynamic>> data;
+  const PrintDialog({super.key, required this.data});
+  @override
+  State<PrintDialog> createState() => _PrintDialogState();
+}
+
+class _PrintDialogState extends State<PrintDialog> {
+  List<Printer> _printers = [];
+  Printer? _selectedPrinter;
+  bool _isLoading = true;
+  bool _isPrinting = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPrinters();
+  }
+
+  Future<void> _loadPrinters() async {
+    try {
+      final list = await Printing.listPrinters();
+      Printer? defaultPrinter;
+      if (list.isNotEmpty) {
+        try {
+          defaultPrinter = list.firstWhere((p) => p.isDefault == true);
+        } catch (_) {
+          defaultPrinter = list.first;
+        }
+      }
+      if (mounted) {
+        setState(() {
+          _printers = list;
+          _selectedPrinter = defaultPrinter;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _print() async {
+    if (_selectedPrinter == null) return;
+    setState(() => _isPrinting = true);
+    try {
+      final pdfBytes = await PrintService.generateUsersPdf(widget.data);
+      final result = await Printing.directPrintPdf(
+        printer: _selectedPrinter!,
+        onLayout: (format) => pdfBytes,
+        name: 'Reporte.pdf',
+      );
+      if (mounted) {
+        Navigator.of(context).pop();
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(result
+              ? 'Enviado a ${_selectedPrinter!.name}'
+              : 'Trabajo de impresión cancelado'),
+        ));
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isPrinting = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e')),
+        );
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 400),
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            spacing: 16,
+            children: [
+              const Text('Seleccionar Impresora',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              if (_isLoading)
+                const Center(child: CircularProgressIndicator())
+              else if (_printers.isEmpty)
+                const Text('No se encontraron impresoras.',
+                    style: TextStyle(color: Colors.red))
+              else
+                DropdownButtonFormField<Printer>(
+                  value: _selectedPrinter,
+                  decoration: const InputDecoration(
+                    labelText: 'Impresora',
+                    border: OutlineInputBorder(),
+                  ),
+                  items: _printers
+                      .map((p) => DropdownMenuItem(
+                            value: p,
+                            child: Text(p.name +
+                                (p.isDefault == true ? ' (default)' : '')),
+                          ))
+                      .toList(),
+                  onChanged: (p) => setState(() => _selectedPrinter = p),
+                ),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                spacing: 8,
+                children: [
+                  TextButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    child: const Text('Cancelar'),
+                  ),
+                  FilledButton.icon(
+                    onPressed:
+                        (_isPrinting || _selectedPrinter == null) ? null : _print,
+                    icon: _isPrinting
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.print),
+                    label: const Text('Imprimir'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+```
+
+### Diferencia entre métodos de impresión
+
+| Método | UX | Cuándo usar |
+|---|---|---|
+| `Printing.layoutPdf(onLayout: ...)` | Abre diálogo nativo del SO | Experiencia rápida, el SO gestiona la selección |
+| `Printing.directPrintPdf(printer: p, onLayout: ...)` | Sin diálogo del SO — envío directo | Cuando tienes selección de impresora propia en Flutter |
+| `Printing.sharePdf(bytes: ...)` | Abre visor/compartir externo | Guardar o enviar por correo |
+| `Printing.listPrinters()` | — | Obtener lista `List<Printer>` para dropdown |
+
+---
+
+## 7.24 Patrón: `GlobalKey<NavigatorState>` — Diálogos desde Callbacks del Tray
+
+Los callbacks `onClick` del tray se ejecutan **fuera del árbol de widgets**. No existe `BuildContext`. Para mostrar un `AlertDialog` o `showDialog` desde un ítem de menú del tray, se usa un `GlobalKey<NavigatorState>` registrado en `MaterialApp`.
+
+```dart
+// lib/main.dart — clave global accesible desde cualquier parte del proceso
+final mainNavigatorKey = GlobalKey<NavigatorState>();
+
+// Función que usa la clave para abrir un diálogo sin context
+void openNewUserDialog() {
+  final ctx = mainNavigatorKey.currentContext;
+  if (ctx == null) return; // ventana puede estar oculta
+  showDialog(
+    context: ctx,
+    barrierDismissible: false,
+    builder: (_) => UserFormDialog(
+      onSaved: () => MainWindowRefreshNotifier.instance.requestRefresh(),
+    ),
+  );
+}
+
+// Registrar la clave en MaterialApp
+MaterialApp(
+  navigatorKey: mainNavigatorKey, // ← obligatorio
+  home: const MainWindow(),
+);
+
+// Uso en un ítem del menú de tray
+MenuItem(
+  label: 'New User',
+  onClick: (_) async {
+    // 1. Traer la ventana al frente primero
+    await windowManager.show();
+    await windowManager.focus();
+    await Future.delayed(const Duration(milliseconds: 200));
+    // 2. Abrir el diálogo con la clave global
+    openNewUserDialog();
+  },
+),
+```
+
+> **Regla:** Siempre esperar a que la ventana esté en primer plano **antes** de abrir el diálogo. Si se abre el diálogo mientras la ventana está oculta, el diálogo queda en un estado inaccesible. Añadir `Future.delayed(Duration(milliseconds: 200))` entre `focus()` y `showDialog()`.
+
+---
+
+## 7.25 Patrón: `ChangeNotifier` Singleton como Bus de Notificaciones Intra-Motor
+
+Para comunicar eventos dentro del mismo motor Flutter (ventana principal ↔ widgets hijos / tray callbacks) sin Riverpod ni channels, se usa un singleton `ChangeNotifier`:
+
+```dart
+// lib/main.dart — bus de notificación global para la ventana principal
+class MainWindowRefreshNotifier extends ChangeNotifier {
+  static final MainWindowRefreshNotifier instance = MainWindowRefreshNotifier._();
+  MainWindowRefreshNotifier._();
+
+  void requestRefresh() => notifyListeners();
+}
+```
+
+```dart
+// En el widget que necesita reaccionar (ej. MainWindow):
+@override
+void initState() {
+  super.initState();
+  MainWindowRefreshNotifier.instance.addListener(_refreshData);
+}
+
+@override
+void dispose() {
+  MainWindowRefreshNotifier.instance.removeListener(_refreshData);
+  super.dispose();
+}
+
+Future<void> _refreshData() async { /* recargar desde DB */ }
+```
+
+```dart
+// Disparar desde cualquier lugar (tray, sub-ventana via WindowMethodChannel, etc.):
+MainWindowRefreshNotifier.instance.requestRefresh();
+```
+
+> **Cuándo usar vs `WindowMethodChannel`:**
+> - **Mismo motor / misma ventana principal** → `ChangeNotifier` singleton (más simple, sin serialización)
+> - **Entre ventanas separadas (`desktop_multi_window`)** → `WindowMethodChannel` (requerido porque son Isolates distintos)
+
+---
+
+## 7.26 Aclaración: `onClick` closures en `MenuItem` tray — Comportamiento Real (Linux)
+
+La documentación clásica indica que **no se deben usar closures `onClick`** en `MenuItem` para Linux/AppIndicator por problemas de bindings C++. **Con `tray_manager: ^0.5.2` este comportamiento cambia:**
+
+| Versión | onClick closures en Linux | Recomendación |
+|---|---|---|
+| `tray_manager < 0.4.x` | ❌ Falla silenciosamente (bindings perdidos) | Usar solo `onTrayMenuItemClick` |
+| `tray_manager ^0.5.2` | ✅ Funcional en Linux con closures | Ambos métodos válidos |
+
+**Patrón con closures (^0.5.2 — más ergonómico):**
+```dart
+await trayManager.setContextMenu(Menu(items: [
+  MenuItem(label: 'Show', onClick: (_) async {
+    await windowManager.show();
+    await windowManager.focus();
+  }),
+  MenuItem(label: 'Exit', onClick: (_) async {
+    await trayManager.destroy();
+    exit(0);
+  }),
+]));
+```
+
+**Patrón con `onTrayMenuItemClick` (compatible con todas las versiones):**
+```dart
+// En el ContextMenu, usar keys en lugar de closures
+await trayManager.setContextMenu(Menu(items: [
+  MenuItem(key: 'show', label: 'Show'),
+  MenuItem(key: 'exit', label: 'Exit'),
+]));
+
+// En el State con TrayListener:
+@override
+void onTrayMenuItemClick(MenuItem item) {
+  switch (item.key) {
+    case 'show': windowManager.show();
+    case 'exit': exit(0);
+  }
+}
+```
+
+> **Recomendación final:** Si necesitas compatibilidad máxima con versiones anteriores de `tray_manager`, usa el patrón `key` + `onTrayMenuItemClick`. Si usas `^0.5.2` y solo apuntas a plataformas modernas, ambos funcionan.
+
+---
+

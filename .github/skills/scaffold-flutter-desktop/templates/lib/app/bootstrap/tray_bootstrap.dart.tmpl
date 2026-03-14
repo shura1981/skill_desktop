@@ -1,0 +1,58 @@
+import 'dart:io';
+import 'package:path/path.dart' as p;
+import 'package:tray_manager/tray_manager.dart';
+import 'package:window_manager/window_manager.dart';
+
+Future<void> focusMainWindow() async {
+  if (!await windowManager.isFocused()) {
+    if (await windowManager.isMinimized()) {
+      await windowManager.restore();
+    }
+    if (Platform.isLinux) {
+      await windowManager.hide();
+    }
+    await windowManager.show();
+    await windowManager.setAlwaysOnTop(true);
+    await windowManager.focus();
+    await Future.delayed(const Duration(milliseconds: 300));
+    await windowManager.setAlwaysOnTop(false);
+  }
+}
+
+String resolveTrayIconPath() {
+  if (Platform.isWindows) {
+    final exeDir = p.dirname(Platform.resolvedExecutable);
+    final candidates = <String>[
+      p.join(exeDir, 'resources', 'app_icon.ico'),
+      p.join(Directory.current.path, 'windows', 'runner', 'resources', 'app_icon.ico'),
+      p.normalize(p.join(exeDir, '..', 'resources', 'app_icon.ico')),
+    ];
+    for (final iconPath in candidates) {
+      if (File(iconPath).existsSync()) {
+        return iconPath;
+      }
+    }
+  }
+  return 'assets/tray_icon.png';
+}
+
+Future<void> setupSystemTray({
+  required Future<void> Function() onOpenMainWindow,
+  required Future<void> Function() onRefresh,
+  required Future<void> Function() onExit,
+}) async {
+  await trayManager.setIcon(resolveTrayIconPath());
+  await trayManager.setContextMenu(Menu(
+    items: [
+      MenuItem(label: 'Show Window', onClick: (_) async => onOpenMainWindow()),
+      MenuItem.separator(),
+      MenuItem(label: 'Refresh', onClick: (_) async => onRefresh()),
+      MenuItem.separator(),
+      MenuItem(label: 'Exit', onClick: (_) async => onExit()),
+    ],
+  ));
+
+  if (Platform.isWindows || Platform.isMacOS) {
+    await trayManager.setToolTip('{{APP_NAME}}');
+  }
+}

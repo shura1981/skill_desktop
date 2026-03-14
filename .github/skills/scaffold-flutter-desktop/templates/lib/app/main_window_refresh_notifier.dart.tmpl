@@ -1,0 +1,9 @@
+import 'package:flutter/material.dart';
+
+class MainWindowRefreshNotifier extends ChangeNotifier {
+  MainWindowRefreshNotifier._();
+
+  static final instance = MainWindowRefreshNotifier._();
+
+  void requestRefresh() => notifyListeners();
+}

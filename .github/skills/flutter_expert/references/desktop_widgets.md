@@ -14,7 +14,7 @@ This document catalogs **every** new widget, updated widget, new property, and A
 > ```
 > **No están disponibles en el canal `stable`.** Solo accesibles en canal `main` con flag experimental.
 >
-> **Para proyectos en stable 3.41: usa `desktop_multi_window: ^0.3.0`** (plugin de producción, arquitectura multi-engine).
+> **Si necesitas ventanas OS simultáneas en stable 3.41:** `desktop_multi_window: ^0.3.0` es la opción viable (arquitectura multi-engine). Para la mayoría de casos — cambiar entre vistas dentro de la misma ventana — un `enum ViewState` + `IndexedStack` es suficiente sin plugins adicionales.
 
 ### Regular Windows — Linux (3.41) [Experimental/Internal]
 - **Estado:** Implementación lista internamente para Linux, marcada `@internal`. Requiere canal `main` + feature flag.
@@ -25,7 +25,7 @@ This document catalogs **every** new widget, updated widget, new property, and A
 
 ### Popup / Dialog / Tooltip Windows (3.41) [Experimental/Internal]
 - Las APIs de popups, diálogos y tooltips multi-window **existen en el SDK** pero siguen siendo `@internal`.
-- **Para stable 3.41:** El plugin `desktop_multi_window: ^0.3.0` provee soporte completo de producción.
+- **Para stable 3.41 (solo si necesitas ventanas OS independientes):** El plugin `desktop_multi_window: ^0.3.0` es la opción viable. Evalúa primero si `ViewState` + `IndexedStack` en una sola ventana cubre tu caso.
 
 ### Desktop Multi-Window Progress (3.32)
 - Progreso significativo en soporte multi-window. Canonical resolvió:
@@ -37,6 +37,8 @@ This document catalogs **every** new widget, updated widget, new property, and A
 ---
 
 ## Multi-Window Architecture — Plugin Stable: `desktop_multi_window` (3.41)
+
+> **⚠️ Evalúa primero si realmente necesitas múltiples ventanas OS.** Para alternar entre secciones (usuarios, correo, etc.), un `enum ViewState` + `IndexedStack` dentro de una sola ventana es suficiente, más simple y sin overhead de comunicación entre engines. Usa `desktop_multi_window` solo cuando necesites ventanas OS independientes y simultáneas (ej: panel flotante, editor secundario, ventana de detalles separada).
 
 ### Arquitectura: Multi-Engine (Una engine Flutter por ventana)
 - `desktop_multi_window: ^0.3.0` crea una **engine Flutter independiente por cada ventana**.
@@ -901,11 +903,11 @@ void onTrayIconMouseDown() async {
 
 ---
 
-## `desktop_multi_window` — ✅ REQUERIDO en Stable 3.41
+## `desktop_multi_window` — Para Ventanas OS Independientes en Stable 3.41
 
-> **Usa este plugin para multi-window en producción.** Las APIs nativas del SDK (`RegularWindowController`, etc.) son `@internal` y solo accesibles en canal `main` con feature flag experimental.
+> **Úsalo solo cuando necesites ventanas OS simultáneas e independientes.** Si solo necesitas alternar vistas dentro de la misma ventana, usa `enum ViewState` + `IndexedStack` — sin plugins adicionales, sin comunicación entre engines, sin overhead.
 >
-> `desktop_multi_window: ^0.3.0` es la solución de producción para Flutter stable 3.41.
+> Cuando sí lo necesites: `desktop_multi_window: ^0.3.0` es la solución de producción para Flutter stable 3.41. Las APIs nativas del SDK (`RegularWindowController`, etc.) son `@internal` y solo accesibles en canal `main` con feature flag experimental.
 
 Arquitectura: **engine Flutter independiente por ventana** (multi-process). Comunicación via `WindowMethodChannel`.
 
@@ -1247,3 +1249,34 @@ final ttf = pw.Font.ttf(fontData);
 pdf.addPage(pw.Page(
   build: (ctx) => pw.Text('Hello', style: pw.TextStyle(font: ttf)),
 ));
+```
+
+---
+
+## WebView en Linux — Sin Soporte (Flutter stable 3.41)
+
+> **Ningún plugin WebView funciona en Flutter Linux stable 3.41.** Usa `url_launcher` como alternativa para abrir URLs en el navegador del sistema.
+
+| Plugin | Error en Linux | Estado |
+|--------|---------------|--------|
+| `webview_flutter` | `WebViewPlatform.instance != null` — no hay implementación para Linux | ❌ No compatible |
+| `flutter_inappwebview` | `InAppWebViewPlatform.instance != null` — idem | ❌ No compatible |
+| `desktop_webview_window` | Segfault al cerrar la ventana WebView, cierra toda la app | ❌ No compatible |
+
+### Alternativa recomendada: `url_launcher`
+
+```dart
+// pubspec.yaml
+// url_launcher: ^6.3.0
+
+import 'package:url_launcher/url_launcher.dart';
+
+Future<void> openInBrowser(String url) async {
+  final uri = Uri.parse(url);
+  if (await canLaunchUrl(uri)) {
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
+}
+```
+
+> Para contenido web embebido dentro de la app en Linux, no existe solución fiable en Flutter stable 3.41. Considera mostrar la URL en un campo de texto copiable o redirigir al navegador del sistema con `url_launcher`.

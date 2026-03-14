@@ -1,0 +1,57 @@
+name: {{PROJECT_NAME}}
+description: "{{APP_DESCRIPTION}}"
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.11.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  cupertino_icons: ^1.0.8
+  path: ^1.9.1
+  path_provider: ^2.1.5
+
+  # ── Window / Tray / Notifications ─────────────────────────────────────────
+  tray_manager: ^0.5.2
+  local_notifier: ^0.1.6
+  window_manager:
+    git:
+      url: https://github.com/boyan01/window_manager.git
+      path: packages/window_manager
+      ref: 6fae92d21b4c80ce1b8f71c1190d7970cf722bd4
+
+  # ── Theme (Riverpod + SharedPreferences) ───────────────────────────────────
+  flutter_riverpod: ^3.2.1
+  shared_preferences: ^2.5.4
+
+  # ── SQLite desktop ─────────────────────────────────────────────────────────
+  sqflite_common_ffi: ^2.4.0+2
+
+  # ── Printing / PDF ─────────────────────────────────────────────────────────
+  printing: ^5.14.2
+  pdf: ^3.11.3
+
+  # ── System info ────────────────────────────────────────────────────────────
+  system_resources: ^1.6.0
+
+  # ── Optional email/HTML rendering ─────────────────────────────────────────
+  enough_mail: ^2.1.7
+  flutter_html: ^3.0.0
+  flutter_widget_from_html: ^0.17.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.4
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/tray_icon.png
+    # Add more asset paths here as needed.

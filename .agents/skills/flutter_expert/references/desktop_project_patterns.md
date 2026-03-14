@@ -256,19 +256,89 @@ class _MainWindowState extends State<MainWindow> with WindowListener, TrayListen
   }
 
   /// LINUX: menú contextual en right mouse UP (al soltar)
-  /// macOS: el SO lo gestiona automáticamente, NO llamar popUpContextMenu()
+  /// macOS: el SO lo gestiona automáticamente — NUNCA llamar popUpContextMenu() en macOS
   @override
   void onTrayIconRightMouseUp() {
     if (Platform.isLinux) trayManager.popUpContextMenu();
   }
 
-  /// Interceptar botón cerrar (X) → ocultar a bandeja en lugar de destruir
+  /// Interceptar botón cerrar (X) → mostrar diálogo de confirmación o minimizar a bandeja
   @override
   void onWindowClose() async {
-    await windowManager.hide();
-    // El ícono de bandeja permanece activo
+    final shouldExit = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Exit Application'),
+        content: const Text('Are you sure you want to exit?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Exit'),
+          ),
+        ],
+      ),
+    );
+    if (shouldExit == true) {
+      await trayManager.destroy();
+      await windowManager.close();
+      exit(0);
+    }
+    // Para "minimizar a bandeja" en lugar de confirmar:
+    // await windowManager.hide();
   }
 }
+```
+
+### Patrón: `GlobalKey<NavigatorState>` — Diálogos desde callbacks del tray
+
+Los callbacks `onClick` del tray se ejecutan **fuera del árbol de widgets** (no hay `BuildContext`). Para mostrar un dialog desde un ítem de menú del tray, se usa `GlobalKey<NavigatorState>`:
+
+```dart
+// lib/main.dart
+final mainNavigatorKey = GlobalKey<NavigatorState>();
+
+/// Llamado desde el tray — no tiene BuildContext propio
+void openNewUserDialog() {
+  final ctx = mainNavigatorKey.currentContext;
+  if (ctx == null) return; // ventana puede estar oculta
+  showDialog(
+    context: ctx,
+    barrierDismissible: false,
+    builder: (_) => UserFormDialog(
+      onSaved: () => MainWindowRefreshNotifier.instance.requestRefresh(),
+    ),
+  );
+}
+
+// Registrar en MaterialApp:
+MaterialApp(
+  navigatorKey: mainNavigatorKey, // ← obligatorio
+  home: const MainWindow(),
+);
+
+// En el menú de tray:
+MenuItem(
+  label: 'New User',
+  onClick: (_) async {
+    // 1. Traer ventana al frente primero
+    if (Platform.isLinux) await windowManager.hide();
+    await windowManager.show();
+    await windowManager.setAlwaysOnTop(true);
+    await windowManager.focus();
+    await Future.delayed(const Duration(milliseconds: 300));
+    await windowManager.setAlwaysOnTop(false);
+    // 2. Pequeño delay extra para que la ventana esté en primer plano
+    await Future.delayed(const Duration(milliseconds: 200));
+    openNewUserDialog();
+  },
+),
+```
+
+> **Regla importante:** Siempre esperar que la ventana esté en foco ANTES de abrir el diálogo. Un diálogo abierto sobre una ventana oculta queda inaccesible para el usuario.
 ```
 
 ### `local_notifier`
@@ -673,3 +743,243 @@ Widget build(BuildContext context) {
 | `CallbackShortcuts` + `Focus(autofocus: true)` | Obligatorio para atajos globales (sin el menú abierto) |
 | `shortcut` en `MenuItemButton` | Solo funciona mientras el menú está abierto — NO es suficiente solo |
 | `RawMenuAnchor` | Para menús sin estilo por defecto, control total del layout (Flutter 3.32+) |
+
+---
+
+## 7. Multiventana — Patrones Avanzados y Bugs Conocidos
+
+### `desktop_multi_window: ^0.3.0` — Patrón Completo (stable 3.41)
+
+Cada sub-ventana es un **motor Flutter separado** (Isolate propio). No comparten estado automáticamente.
+
+#### Abrir sub-ventana y pasarle datos
+
+```dart
+import 'dart:convert';
+import 'package:desktop_multi_window/desktop_multi_window.dart';
+
+Future<void> openFormWindow({Map<String, dynamic>? initialData}) async {
+  final controller = await WindowController.create(
+    WindowConfiguration(
+      hiddenAtLaunch: true, // Evita flash sin estilo
+      arguments: jsonEncode({
+        'type': 'form',
+        'windowId': WindowController.mainWindowId, // Para comunicación de vuelta
+        'initialData': initialData,
+      }),
+    ),
+  );
+  await controller.show();
+}
+```
+
+#### Bootstrap multi-ventana en `main()` (`lib/main.dart`)
+
+```dart
+Future<void> main(List<String> args) async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  // Detectar qué tipo de ventana lanzar
+  final windowController = await WindowController.fromCurrentEngine();
+  final rawArgs = await windowController.arguments;
+
+  if (rawArgs.isNotEmpty) {
+    // Sub-ventana: leer tipo y datos del JSON
+    final config = jsonDecode(rawArgs) as Map<String, dynamic>;
+    final windowType = config['type'] as String? ?? 'form';
+
+    // Sub-ventanas NO necesitan tray, window_manager completo, etc.
+    runApp(ProviderScope(
+      child: switch (windowType) {
+        'form' => UserFormWindow(
+            mainWindowId: config['windowId'] as String?,
+            initialData: config['initialData'] as Map<String, dynamic>?,
+          ),
+        _ => const Placeholder(),
+      },
+    ));
+    return;
+  }
+
+  // Ventana principal: inicializar todos los plugins
+  await windowManager.ensureInitialized();
+  await windowManager.setPreventClose(true);
+  // ... tray, notifier, etc.
+  runApp(const ProviderScope(child: MainApp()));
+}
+```
+
+#### Sub-ventana: interceptar botón X nativo (OBLIGATORIO — evita crash)
+
+```dart
+// En la sub-ventana, SIEMPRE en initState:
+@override
+void initState() {
+  super.initState();
+  windowManager.addListener(this);
+  _initWindow();
+}
+
+Future<void> _initWindow() async {
+  await windowManager.ensureInitialized();
+  // Sin esto, el botón X del SO mata TODA la app principal
+  await windowManager.setPreventClose(true);
+}
+
+@override
+void onWindowClose() async {
+  // hide() en lugar de destroy() — preserva el motor para reapertura rápida
+  final self = await WindowController.fromCurrentEngine();
+  await self.hide();
+}
+```
+
+#### Comunicación sub-ventana → ventana principal
+
+```dart
+// En la sub-ventana, después de guardar:
+final mainId = widget.mainWindowId;
+if (mainId != null) {
+  final mainController = WindowController.fromWindowId(mainId);
+  await mainController.invokeMethod('refresh'); // Señal sin datos
+  // o con datos:
+  await mainController.invokeMethod('userSaved', {'id': newUserId});
+}
+await (await WindowController.fromCurrentEngine()).hide();
+```
+
+```dart
+// En la ventana principal — escuchar señales de sub-ventanas:
+@override
+void initState() {
+  super.initState();
+  DesktopMultiWindow.setMethodHandler((call, fromWindowId) async {
+    if (call.method == 'refresh') await _refreshData();
+    if (call.method == 'userSaved') await _refreshData();
+    return null;
+  });
+}
+```
+
+### Bus de Notificación Singleton (`MainWindowRefreshNotifier`)
+
+Para comunicación dentro del mismo motor (no entre ventanas separadas), un `ChangeNotifier` singleton evita el overhead de channels:
+
+```dart
+// lib/main.dart
+class MainWindowRefreshNotifier extends ChangeNotifier {
+  static final MainWindowRefreshNotifier instance = MainWindowRefreshNotifier._();
+  MainWindowRefreshNotifier._();
+
+  void requestRefresh() => notifyListeners();
+}
+```
+
+```dart
+// Suscribirse (ej. en MainWindow):
+MainWindowRefreshNotifier.instance.addListener(_refreshData);
+
+// Disparar desde tray callback, sub-ventana via WindowMethodChannel, etc.:
+MainWindowRefreshNotifier.instance.requestRefresh();
+```
+
+> **Cuándo usar:** Solo dentro del mismo motor (ventana principal). Para ventanas separadas de `desktop_multi_window`, `WindowMethodChannel` o `WindowController.invokeMethod()` es la única vía.
+
+### Registro nativo de plugins (OBLIGATORIO para que plugins funcionen en sub-ventanas)
+
+**Linux** — `linux/runner/my_application.cc`:
+
+```cpp
+#include "desktop_multi_window/desktop_multi_window_plugin.h"
+
+// Dentro de my_application_activate(), antes de gtk_widget_grab_focus:
+desktop_multi_window_plugin_set_window_created_callback(
+    [](FlPluginRegistry* registry) {
+      fl_register_plugins(registry);
+    });
+```
+
+**Windows** — `windows/runner/flutter_window.cpp`:
+```cpp
+#include "desktop_multi_window/desktop_multi_window_plugin.h"
+DesktopMultiWindowSetWindowCreatedCallback([](void* controller) {
+  auto* fvc = reinterpret_cast<flutter::FlutterViewController*>(controller);
+  RegisterPlugins(fvc->engine());
+});
+```
+
+**macOS** — `macos/Runner/MainFlutterWindow.swift`:
+```swift
+import desktop_multi_window
+FlutterMultiWindowPlugin.setOnWindowCreatedCallback { controller in
+  RegisterGeneratedPlugins(registry: controller)
+}
+```
+
+### Bugs conocidos de `desktop_multi_window` + `window_manager` en Linux
+
+| Bug | Síntoma | Solución |
+|---|---|---|
+| Botón X en sub-ventana mata app principal | Crash silencioso — proceso completo muere | `setPreventClose(true)` + `WindowController.hide()` en sub-ventana |
+| Sub-ventana no puede mostrar diálogos | `showDialog()` falla sin context válido | Usar la ventana secundaria como `MaterialApp` independiente con su propio `navigatorKey` |
+| Plugin no responde en sub-ventana | `MissingPluginException` | Registrar plugins en el callback nativo C++/Swift |
+| Wayland: sub-ventana no aparece al frente | Foco stealing prevention de Wayland | `hide()` + `show()` + `setAlwaysOnTop(true)` + delay + `setAlwaysOnTop(false)` |
+
+---
+
+## 8. Impresión Avanzada — Lista de Impresoras Personalizada
+
+Para mostrar un selector de impresora dentro de la app (en lugar del diálogo nativo del SO):
+
+```dart
+import 'package:printing/printing.dart';
+
+// Obtener lista de impresoras disponibles
+final printers = await Printing.listPrinters(); // → List<Printer>
+
+// Imprimir directamente a una impresora seleccionada (sin diálogo del SO)
+final result = await Printing.directPrintPdf(
+  printer: selectedPrinter,
+  onLayout: (format) => PrintService.generateUsersPdf(data),
+  name: 'Reporte.pdf',
+);
+// result == true si el trabajo fue aceptado por el spooler
+```
+
+### Tabla comparativa de métodos de impresión
+
+| Método | Diálogo SO | Selección previa | Cuándo usar |
+|---|---|---|---|
+| `Printing.layoutPdf(onLayout: ...)` | ✅ Sí | No requerida | Flujo simplificado, OS gestiona todo |
+| `Printing.directPrintPdf(printer: p, ...)` | ❌ No | `Printing.listPrinters()` | Selector propio en Flutter UI |
+| `Printing.sharePdf(bytes: ...)` | ✅ Sí | No requerida | Guardar/compartir desde el SO |
+
+#### Seleccionar la impresora por defecto
+
+```dart
+final printers = await Printing.listPrinters();
+Printer? defaultPrinter;
+try {
+  defaultPrinter = printers.firstWhere((p) => p.isDefault == true);
+} catch (_) {
+  defaultPrinter = printers.isNotEmpty ? printers.first : null;
+}
+```
+
+---
+
+## 9. WebView en Linux — No hay soporte (Flutter stable 3.41)
+
+> **Ningún plugin de webview funciona en Flutter Linux desktop stable 3.41.** Para cualquier necesidad de abrir URLs, usar `url_launcher`:
+
+```dart
+import 'package:url_launcher/url_launcher.dart';
+
+await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+```
+
+| Plugin | Error | Alternativa |
+|---|---|---|
+| `webview_flutter` | Sin impl. Linux | `url_launcher` |
+| `flutter_inappwebview` | Backend GTK no registrado | `url_launcher` |
+| `desktop_webview_window` | Segfault + cierra toda la app | `url_launcher` |

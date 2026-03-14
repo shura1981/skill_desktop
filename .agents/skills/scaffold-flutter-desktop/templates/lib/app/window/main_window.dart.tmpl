@@ -1,0 +1,133 @@
+import 'dart:io';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:tray_manager/tray_manager.dart';
+import 'package:window_manager/window_manager.dart';
+import 'package:{{PROJECT_NAME}}/app/main_window_refresh_notifier.dart';
+
+// TODO: Add feature-specific imports (database_helper, print_dialog, etc.)
+
+class MainWindow extends StatefulWidget {
+  const MainWindow({super.key});
+
+  @override
+  State<MainWindow> createState() => _MainWindowState();
+}
+
+class _MainWindowState extends State<MainWindow>
+    with WindowListener, TrayListener {
+  // TODO: Add state variables here.
+
+  @override
+  void initState() {
+    super.initState();
+    windowManager.addListener(this);
+    trayManager.addListener(this);
+    MainWindowRefreshNotifier.instance.addListener(_onRefreshRequested);
+  }
+
+  @override
+  void dispose() {
+    windowManager.removeListener(this);
+    trayManager.removeListener(this);
+    MainWindowRefreshNotifier.instance.removeListener(_onRefreshRequested);
+    super.dispose();
+  }
+
+  void _onRefreshRequested() {
+    // TODO: Reload data or refresh state when triggered by tray/external events.
+    setState(() {});
+  }
+
+  // ── Tray events ────────────────────────────────────────────────────────────
+
+  /// Single click on tray icon — show and focus the main window.
+  @override
+  void onTrayIconMouseDown() async {
+    if (!await windowManager.isFocused()) {
+      if (await windowManager.isMinimized()) await windowManager.restore();
+      if (Platform.isLinux) {
+        // Unmap + remap is required on Wayland to bypass focus-stealing prevention.
+        // Do NOT remove this — without it, the window does not come to the foreground.
+        await windowManager.hide();
+      }
+      await windowManager.show();
+      await windowManager.setAlwaysOnTop(true);
+      await windowManager.focus();
+      await Future.delayed(const Duration(milliseconds: 300));
+      await windowManager.setAlwaysOnTop(false);
+    }
+  }
+
+  /// Right-click on tray icon — show context menu (Windows only; Linux is handled below).
+  @override
+  void onTrayIconRightMouseDown() {
+    if (Platform.isWindows) trayManager.popUpContextMenu();
+  }
+
+  /// Right-click released on tray icon — show context menu (Linux/GTK).
+  @override
+  void onTrayIconRightMouseUp() {
+    if (Platform.isLinux) trayManager.popUpContextMenu();
+  }
+
+  // ── Window events ──────────────────────────────────────────────────────────
+
+  /// Intercepts the OS close button — asks for confirmation before exiting.
+  @override
+  void onWindowClose() async {
+    final shouldExit = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Exit Application'),
+        content: const Text('Are you sure you want to close {{APP_NAME}}?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Exit'),
+          ),
+        ],
+      ),
+    );
+    if (shouldExit == true) {
+      await windowManager.close();
+      exit(0);
+    }
+  }
+
+  /// Minimize to tray instead of hiding the window completely.
+  @override
+  void onWindowMinimize() async {
+    await windowManager.hide();
+  }
+
+  // ── Build ──────────────────────────────────────────────────────────────────
+
+  @override
+  Widget build(BuildContext context) {
+    return CallbackShortcuts(
+      bindings: {
+        // TODO: Add keyboard shortcuts, e.g.:
+        // const SingleActivator(LogicalKeyboardKey.keyN, control: true): () { ... },
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('{{APP_NAME}}'),
+          actions: [
+            // TODO: Add AppBar action buttons.
+          ],
+        ),
+        body: const Center(
+          child: Text(
+            'Welcome to {{APP_NAME}}!',
+            style: TextStyle(fontSize: 24),
+          ),
+        ),
+      ),
+    );
+  }
+}
