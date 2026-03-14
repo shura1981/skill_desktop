@@ -40,13 +40,16 @@ class TrayController with TrayListener, WindowListener {
   }
 
   static String _trayAssetByPlatform() {
+    if (Platform.isLinux) {
+      return 'assets/tray_icon_48x48.png';
+    }
     if (Platform.isWindows) {
       return 'assets/icons/tray_icon.ico';
     }
     if (Platform.isMacOS) {
       return 'assets/icons/tray_icon.icns';
     }
-    return 'assets/icons/tray_icon.png';
+    return 'assets/tray_icon_48x48.png';
   }
 
   static Menu _buildContextMenu() {

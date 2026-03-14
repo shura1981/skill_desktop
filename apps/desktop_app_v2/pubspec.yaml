@@ -74,6 +74,8 @@ flutter:
   # the material Icons class.
   uses-material-design: true
   assets:
+    - assets/app_icon.png
+    - assets/tray_icon_48x48.png
     - assets/icons/tray_icon.png
     - assets/icons/tray_icon.ico
     - assets/icons/tray_icon.icns

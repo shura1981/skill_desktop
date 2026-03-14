@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:window_manager/window_manager.dart';
 
 import '../models/user.dart';
 import '../services/user_repository.dart';
@@ -146,29 +145,35 @@ class _HomePageState extends State<HomePage> {
     return PlatformMenuBar(
       menus: _buildDesktopMenus(),
       child: Scaffold(
-        appBar: AppBar(
-          title: const Text('Usuarios'),
-          actions: [
-            IconButton(
-              tooltip: 'Buscar',
-              icon: const Icon(Icons.search),
-              onPressed: _openSearch,
+        body: Column(
+          children: [
+            _buildDesktopMenuStrip(context),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
+              child: Row(
+                children: [
+                  Text('Usuarios', style: Theme.of(context).textTheme.titleLarge),
+                  const Spacer(),
+                  IconButton(
+                    tooltip: 'Buscar',
+                    icon: const Icon(Icons.search),
+                    onPressed: _openSearch,
+                  ),
+                  IconButton(
+                    tooltip: 'Tema',
+                    icon: const Icon(Icons.palette_outlined),
+                    onPressed: _openThemeSettings,
+                  ),
+                ],
+              ),
             ),
-            IconButton(
-              tooltip: 'Tema',
-              icon: const Icon(Icons.palette_outlined),
-              onPressed: _openThemeSettings,
-            ),
-            IconButton(
-              tooltip: 'Minimizar',
-              icon: const Icon(Icons.minimize),
-              onPressed: () => windowManager.minimize(),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: _isLoading ? const Center(child: CircularProgressIndicator()) : _buildUserTable(),
+              ),
             ),
           ],
-        ),
-        body: Padding(
-          padding: const EdgeInsets.all(12),
-          child: _isLoading ? const Center(child: CircularProgressIndicator()) : _buildUserTable(),
         ),
         floatingActionButton: FloatingActionButton.extended(
           onPressed: () {
@@ -176,6 +181,58 @@ class _HomePageState extends State<HomePage> {
           },
           icon: const Icon(Icons.add),
           label: const Text('Nuevo'),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDesktopMenuStrip(BuildContext context) {
+    final color = Theme.of(context).colorScheme.surfaceContainerHighest;
+    return ColoredBox(
+      color: color,
+      child: SizedBox(
+        height: 34,
+        width: double.infinity,
+        child: Align(
+          alignment: Alignment.centerLeft,
+          child: MenuBar(
+            style: MenuStyle(
+              backgroundColor: WidgetStatePropertyAll(color),
+              shape: const WidgetStatePropertyAll(
+                RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+              ),
+            ),
+            children: [
+              SubmenuButton(
+                menuChildren: [
+                  MenuItemButton(
+                    onPressed: () {
+                      _showUserForm();
+                    },
+                    child: const Text('Nuevo'),
+                  ),
+                  MenuItemButton(
+                    onPressed: _openSearch,
+                    child: const Text('Buscar'),
+                  ),
+                ],
+                child: const Text('Edicion'),
+              ),
+              SubmenuButton(
+                menuChildren: [
+                  MenuItemButton(
+                    onPressed: _showAbout,
+                    child: const Text('Acerca de'),
+                  ),
+                  MenuItemButton(
+                    onPressed: _showLicenses,
+                    child: const Text('Licencias'),
+                  ),
+                ],
+                child: const Text('Ayuda'),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -209,13 +266,15 @@ class _HomePageState extends State<HomePage> {
                 mainAxisSize: MainAxisSize.min,
                 spacing: 8,
                 children: [
-                  OutlinedButton(
+                  IconButton(
+                    tooltip: 'Actualizar',
                     onPressed: () => _showUserForm(user),
-                    child: const Text('Actualizar'),
+                    icon: const Icon(Icons.edit_outlined),
                   ),
-                  FilledButton.tonal(
+                  IconButton(
+                    tooltip: 'Eliminar',
                     onPressed: () => _deleteUser(user),
-                    child: const Text('Eliminar'),
+                    icon: const Icon(Icons.delete_outline),
                   ),
                 ],
               ),
