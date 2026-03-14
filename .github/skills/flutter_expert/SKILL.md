@@ -1123,6 +1123,8 @@ class _AppState extends State<MyApp> with TrayListener, WindowListener {
 
 ### Known Issues
 
+- **Transparencia en Linux:** Un ícono de tray (.png) que es completamente transparente o de 1x1 pixel no solo será invisible, sino **inclickable**, impidiendo que aparezca el menú.
+- **Closures en menú (Linux):** NUNCA uses la propiedad `onClick: () {}` dentro de un `MenuItem` si apuntas a Linux/AppIndicator; la propagación C++ a Dart falla al usar cierres anónimos (bindings perdidos). Emplea SIEMPRE el método sobrescrito `onTrayMenuItemClick(MenuItem)` de la clase `TrayListener`.
 - **`app_links` conflict:** Si usas `app_links`, debe ser `>= 6.3.3`. Versiones anteriores bloquean la propagación de eventos e impiden que se disparen los clicks del menú de bandeja.
 - **GNOME (Linux):** El ícono puede no mostrarse sin la extensión [AppIndicator](https://extensions.gnome.org/extension/615/appindicator-support/).
 
@@ -1153,24 +1155,22 @@ String resolveTrayIconPath() {
 await trayManager.setIcon(resolveTrayIconPath());
 ```
 
-### Patrón Real: Diferencias de Eventos de Clic Derecho por Plataforma
+### Patrón Real: Diferencias de Eventos de Menú por Plataforma
 
-Cada SO dispara el menú contextual en un evento diferente. Ignorar esto provoca que el menú no aparezca en alguna plataforma:
+En las versiones modernas, AppIndicator (Linux) y macOS procesan el menú contextual nativo. Llamar a rutinas adicionales manualmente causará conflictos.
 
 ```dart
-/// WINDOWS: menú en onTrayIconRightMouseDown (al presionar)
-@override
-void onTrayIconRightMouseDown() {
-  if (Platform.isWindows) trayManager.popUpContextMenu();
-}
+  /// Windows puede requerir que forcemos el menú
+  @override
+  void onTrayIconRightMouseDown() {
+    if (Platform.isWindows || Platform.isMacOS) {
+      trayManager.popUpContextMenu();
+    }
+  }
 
-/// LINUX: menú en onTrayIconRightMouseUp (al soltar)
-@override
-void onTrayIconRightMouseUp() {
-  if (Platform.isLinux) trayManager.popUpContextMenu();
-}
-
-/// macOS: el SO muestra el menú automáticamente — NO invocar popUpContextMenu()
+  /// LINUX: NUNCA usar popUpContextMenu, el sistema lo despliega automáticamente de forma nativa.
+  @override
+  void onTrayIconRightMouseUp() {}
 ```
 
 ### Patrón Real: Restaurar Ventana desde Bandeja (Workaround Wayland)
