@@ -89,6 +89,37 @@ When the user describes their project, use the templates in `templates/` as star
 | Tray icon missing on Windows | `resolveTrayIconPath()` is included in `main.dart.tmpl` — add `.ico` to `windows/runner/resources/` |
 | Window not raised on Wayland | Focus sequence in `app/bootstrap/tray_bootstrap.dart.tmpl` handles this — do not simplify it |
 | `sqfliteFfiInit()` not called error | Ensure `core/data/database_helper.dart.tmpl` init block is present before first db call |
+| Linux compile fails with `app_indicator_new` deprecated | In `linux/CMakeLists.txt`, use `target_compile_options(${TARGET} PRIVATE -Wall -Werror -Wno-error=deprecated-declarations)` |
+| Linux install fails with missing `build/native_assets/linux` | Guard native assets install using `if(EXISTS "${NATIVE_ASSETS_DIR}") ... endif()` |
+
+## Linux Build Error (`fvm flutter run -d linux`)
+
+If Linux build fails with:
+
+```text
+.../tray_manager_plugin.cc:118:17: error: 'app_indicator_new' is deprecated [-Werror,-Wdeprecated-declarations]
+```
+
+and/or:
+
+```text
+file INSTALL cannot find ".../build/native_assets/linux": No such file or directory.
+```
+
+apply this in `linux/CMakeLists.txt`:
+
+```cmake
+target_compile_options(${TARGET} PRIVATE -Wall -Werror -Wno-error=deprecated-declarations)
+
+set(NATIVE_ASSETS_DIR "${PROJECT_BUILD_DIR}native_assets/linux/")
+if(EXISTS "${NATIVE_ASSETS_DIR}")
+  install(DIRECTORY "${NATIVE_ASSETS_DIR}"
+    DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
+    COMPONENT Runtime)
+endif()
+```
+
+This keeps deprecated warnings from failing the build and avoids install crashes when native assets are not generated.
 
 ## References
 
